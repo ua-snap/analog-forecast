@@ -3,7 +3,6 @@
 TO-DO: compute forecasts
 """
 
-
 import argparse
 import xarray as xr
 from dask.distributed import Client
@@ -67,23 +66,17 @@ def get_rmse(da, ref_date, bbox):
     return rmse_da.compute()
 
 
-def drop_duplicate_years(da):
-    """Drop the duplicated years from a time series data array. This is being done because analogs might occur in the same year as the reference date and notes from meetings with collaborators indicate that there should only be one analog per year, as was the case for the previous iteration of the algorithm. 
-    
-    Duplicates are identified based on ordering in array, so arrays should be pre-sorted. 
+def find_analogs(varname, ref_date, spatial_domain, data_dir, workers):
+    """Find the analogs. Starts and stops a dask cluster for the processing. 
     
     Args:
-        da (xarray.DataArray): dataarray with time axis
+        varname (str): name of variable to search analogs based on
+        ref_date (str): reference date in formate YYYY-mm-dd
+        spatial_domain (str): name of 
         
     Returns:
         out_da (xarray.DataArray): data array with duplicated years dropped
     """
-    
-
-if __name__ == "__main__":
-    # parse some args
-    varname, ref_date, spatial_domain, workers = parse_args()
-
     # start dask cluster
     client = Client(n_workers=workers)
     
@@ -117,3 +110,12 @@ if __name__ == "__main__":
         print(f"Rank {rank}:   Date: {date:%Y-%m-%d};  RMSE: {round(rmse, 3):.3f}")
 
     client.close()
+    
+    return analogs
+    
+
+if __name__ == "__main__":
+    # parse some args
+    varname, ref_date, spatial_domain, workers = parse_args()
+    analogs = find_analogs(varname, ref_date, spatial_domain, data_dir, workers)
+    
