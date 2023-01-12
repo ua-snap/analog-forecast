@@ -14,30 +14,8 @@ import luts
 from config import data_dir
 
 
-# TO-DO: fix for single year! particularly SST, all analogs are most recent days
-def get_rmse(da, ref_date, bbox):
-    """Get the RMSE between da at ref_time and every other preceding time slice. Calls compute() to process with dask.
-    
-    Args:
-        da (xarray.DataArray): dataarray of ERA5 data, with time, latitude, longitude axes
-        ref_date (str): reference date to compare all other preceding time slices against
-        bbox (tuple): bounding box for subdomain selection
-        
-    Returns:
-        rmse_da (xarra.DataArray): data array with an RMSE computed for each date preceding ref_date
-    """
-    sub_da = da.sel(latitude=slice(bbox[3], bbox[1]), longitude=slice(bbox[0], bbox[2]))
-    ref_da = sub_da.sel(time=ref_date).squeeze()
-    end_search_date = pd.to_datetime(ref_date) - pd.to_timedelta(1, unit="d")
-    search_da = sub_da.sel(time=slice(da.time.values[0], end_search_date))
-    rmse_da = np.sqrt(((ref_da - search_da) ** 2).mean(axis=(0, 1)))
-    
-    # calls compute to run the computation with dask
-    return rmse_da.compute()
-
-
-if __name__ == "__main__":
-
+def parse_args():
+    """Parse some arguments"""
     parser = argparse.ArgumentParser(description=__doc__)
     # parser.add_argument("-v", dest="varname", type=str, help="Variable name, either 'tp' or 'pev'")
     parser.add_argument(
@@ -64,22 +42,73 @@ if __name__ == "__main__":
         "-w", dest="workers", type=int, help="Number of workers to use for dask", default=8
     )
     args = parser.parse_args()
-    varname = args.varname
-    ref_date = args.ref_date
+    
+    return args.varname, args.ref_date, args.spatial_domain, args.workers
 
-    fp = data_dir.joinpath(luts.varnames_lu[varname]["filename"])
+
+def get_rmse(da, ref_date, bbox):
+    """Get the RMSE between da at ref_time and every other preceding time slice. Calls compute() to process with dask.
+    
+    Args:
+        da (xarray.DataArray): dataarray of ERA5 data, with time, latitude, longitude axes
+        ref_date (str): reference date to compare all other preceding time slices against
+        bbox (tuple): bounding box for subdomain selection
+        
+    Returns:
+        rmse_da (xarra.DataArray): data array with an RMSE computed for each date preceding ref_date
+    """
+    sub_da = da.sel(latitude=slice(bbox[3], bbox[1]), longitude=slice(bbox[0], bbox[2]))
+    ref_da = sub_da.sel(time=ref_date).squeeze()
+    end_search_date = pd.to_datetime(ref_date) - pd.to_timedelta(1, unit="d")
+    search_da = sub_da.sel(time=slice(da.time.values[0], end_search_date))
+    rmse_da = np.sqrt(((ref_da - search_da) ** 2).mean(axis=(0, 1)))
+    
+    # calls compute to run the computation with dask
+    return rmse_da.compute()
+
+
+def drop_duplicate_years(da):
+    """Drop the duplicated years from a time series data array. This is being done because analogs might occur in the same year as the reference date and notes from meetings with collaborators indicate that there should only be one analog per year, as was the case for the previous iteration of the algorithm. 
+    
+    Duplicates are identified based on ordering in array, so arrays should be pre-sorted. 
+    
+    Args:
+        da (xarray.DataArray): dataarray with time axis
+        
+    Returns:
+        out_da (xarray.DataArray): data array with duplicated years dropped
+    """
+    
+
+if __name__ == "__main__":
+    # parse some args
+    varname, ref_date, spatial_domain, workers = parse_args()
 
     # start dask cluster
-    client = Client(n_workers=args.workers)
+    client = Client(n_workers=workers)
+    
     # open connection to file
+    fp = data_dir.joinpath(luts.varnames_lu[varname]["filename"])
     ds = xr.open_dataset(fp, chunks="auto")
-
-    bbox = luts.spatial_domains[args.spatial_domain]["bbox"]
-
+    
+    # get the bbox for search
+    bbox = luts.spatial_domains[spatial_domain]["bbox"]
+    
+    # compute RMSE between ref_date and all preceding dates 
+    #  for the specified variable and spatial domain
     rmse_da = get_rmse(ds[varname], ref_date, bbox)
-
-    # get the 5 best analogs
-    analogs = rmse_da.sortby(rmse_da).isel(time=slice(5))
+    
+    # sort before dropping duplicated years
+    rmse_da = rmse_da.sortby(rmse_da)
+    # drop duplicated years.
+    # This is being done because analogs might occur in the same year as the
+    #  reference date and notes from meetings with collaborators indicate that
+    #  there should only be one analog per year, as was the case for the
+    #  previous iteration of the algorithm.
+    keep_indices = ~pd.Series(rmse_da.time.dt.year).duplicated()
+    analogs = rmse_da.isel(time=keep_indices)
+    # subset to first 5 analogs for now
+    analogs = analogs.isel(time=slice(5))
 
     print("   Top 5 Analogs: ")
     for rank, date, rmse in zip(
