@@ -1,6 +1,4 @@
 """Script to look for analogs in ERA5 datasets and return RMSE and dates. 
-
-TO-DO: compute forecasts
 """
 
 import argparse
@@ -72,17 +70,19 @@ def find_analogs(varname, ref_date, spatial_domain, data_dir, workers):
     Args:
         varname (str): name of variable to search analogs based on
         ref_date (str): reference date in formate YYYY-mm-dd
-        spatial_domain (str): name of 
+        spatial_domain (str): name of the spatial domain to use
+        data_dir (pathlib.PosixPath): path to the directory containing the ERA5 data files
+        workers (int): number of dask workers to use for localcluster
         
     Returns:
-        out_da (xarray.DataArray): data array with duplicated years dropped
+        analogs (xarray.DataArray): data array of RMSE values and dates for 5 best analogs
     """
     # start dask cluster
     client = Client(n_workers=workers)
     
     # open connection to file
     fp = data_dir.joinpath(luts.varnames_lu[varname]["filename"])
-    ds = xr.open_dataset(fp, chunks="auto")
+    ds = xr.open_dataset(fp)
     
     # get the bbox for search
     bbox = luts.spatial_domains[spatial_domain]["bbox"]
@@ -108,11 +108,68 @@ def find_analogs(varname, ref_date, spatial_domain, data_dir, workers):
         [1, 2, 3, 4, 5], pd.to_datetime(analogs.time.values), analogs.values
     ):
         print(f"Rank {rank}:   Date: {date:%Y-%m-%d};  RMSE: {round(rmse, 3):.3f}")
-
+    
+    ds.close()
     client.close()
     
     return analogs
+
+
+def make_forecast(analogs, varname, ref_date, spatial_domain, data_dir):
+    """Use a dataarray of analogs containing dates to create a composite forecast for 14 days following reference date
     
+    Args:
+        analogs (xarray.DataArray): data array of RMSE values and dates for 5 best analogs
+        ref_date (str): reference date in formate YYYY-mm-dd
+        spatial_domain (str): name of the spatial domain to use
+        data_dir (pathlib.PosixPath): path to the directory containing the ERA5 data files
+    
+    Returns:
+        forecast (xarray.DataArray): forecast values computed for the 14 days following ref_date. Computed as the mean of corresponding days following each analog. 
+    """
+    # get the bbox for composite mean/"forecast"
+    bbox = luts.spatial_domains[spatial_domain]["bbox"]
+    
+    # get filepath to data file used
+    fp = data_dir.joinpath(luts.varnames_lu[varname]["filename"])
+    
+    # susbet the data spatially as was done for analogs, then extract
+    #  the next 14 days following the analog date
+    with xr.open_dataset(fp) as ds:
+        ds = ds.sel(
+            latitude=slice(bbox[3], bbox[1]),
+            longitude=slice(bbox[0], bbox[2])
+        )
+        arr = []
+        for t in analogs.time:
+            time_sl = slice(
+                t + pd.to_timedelta(1, unit="d"),
+                t + pd.to_timedelta(14, unit="d")
+            )
+            arr.append(ds[varname].sel(
+                time=time_sl,
+
+            ).values)
+    # take mean over axis 0 (year/analog axis) to get the forecast
+    #  will have shape of (14, n_lat, n_lon)
+    composite = np.array(arr).mean(axis=0)
+    
+    # construct a new data array
+    time = pd.date_range(
+        pd.to_datetime(ref_date) + pd.to_timedelta(1, unit="d"),
+        periods=14
+    )
+    forecast = xr.DataArray(
+        data=composite,
+        dims=ds[varname].dims,
+        coords=dict(
+            longitude=(["longitude"], ds.longitude.data),
+            latitude=(["latitude"], ds.latitude.data),
+            time=time,
+        ),
+    )
+    
+    return forecast
 
 if __name__ == "__main__":
     # parse some args
