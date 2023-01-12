@@ -98,6 +98,7 @@ def find_analogs(varname, ref_date, spatial_domain, data_dir, workers):
     #  reference date and notes from meetings with collaborators indicate that
     #  there should only be one analog per year, as was the case for the
     #  previous iteration of the algorithm.
+    print(rmse_da)
     keep_indices = ~pd.Series(rmse_da.time.dt.year).duplicated()
     analogs = rmse_da.isel(time=keep_indices)
     # subset to first 5 analogs for now
@@ -156,7 +157,7 @@ def make_forecast(analogs, varname, ref_date, spatial_domain, data_dir):
     
     # construct a new data array
     time = pd.date_range(
-        pd.to_datetime(ref_date) + pd.to_timedelta(1, unit="d"),
+        pd.to_datetime(ref_date + " 12:00:00") + pd.to_timedelta(1, unit="d"),
         periods=14
     )
     forecast = xr.DataArray(

@@ -17,8 +17,8 @@ varnames_lu = {
 spatial_domains = {
     # min lon, min lat, max lon, max lat
     "alaska": {"bbox": (-180, 44, -125, 76)},
-    "northern_hs": {"bbox": (-180, 0, -180, 90)},
-    "panarctic": {"bbox": (-180, 55, -180, 90)},
+    "northern_hs": {"bbox": (-180, 0, 180, 90)},
+    "panarctic": {"bbox": (-180, 55, 180, 90)},
 }
 
 
