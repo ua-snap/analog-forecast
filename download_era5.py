@@ -1,4 +1,4 @@
-"""This is the script that was used to download the hourly ERA5 temperature, sea level pressure, geopotential height, and sea surface temperature data for the analog forecast tool.
+"""This is the script that was used to download the hourly ERA5 temperature, sea level pressure, and sea surface temperature data for the analog forecast tool.
 """
 
 import argparse
@@ -12,7 +12,7 @@ def download(download_dir):
     # trying to see if this can be done all in one request (might be too many "elements")
     logging.info(f"Downloading hourly ERA5 data to {download_dir}")
     c = cdsapi.Client()
-    for varname in ["2m_temperature", "geopotential", "mean_sea_level_pressure", "sea_surface_temperature"]:
+    for varname in ["2m_temperature", "mean_sea_level_pressure", "sea_surface_temperature"]:
         c.retrieve(
             "reanalysis-era5-single-levels",
             {   
