@@ -1,4 +1,4 @@
-"""This is the script that was used to download the hourly ERA5 geopotential height at 500 hPa data for the analog forecast tool.
+"""This is the script that was used to download the hourly ERA5 geopotential height at 500 hPadown data for the analog forecast tool.
 """
 
 import argparse

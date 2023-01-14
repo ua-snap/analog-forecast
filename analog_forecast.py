@@ -14,7 +14,6 @@ from config import data_dir
 def parse_args():
     """Parse some arguments"""
     parser = argparse.ArgumentParser(description=__doc__)
-    # parser.add_argument("-v", dest="varname", type=str, help="Variable name, either 'tp' or 'pev'")
     parser.add_argument(
         "-v",
         dest="varname",
@@ -98,7 +97,6 @@ def find_analogs(varname, ref_date, spatial_domain, data_dir, workers):
     #  reference date and notes from meetings with collaborators indicate that
     #  there should only be one analog per year, as was the case for the
     #  previous iteration of the algorithm.
-    print(rmse_da)
     keep_indices = ~pd.Series(rmse_da.time.dt.year).duplicated()
     analogs = rmse_da.isel(time=keep_indices)
     # subset to first 5 analogs for now
