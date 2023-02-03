@@ -80,7 +80,7 @@ def find_analogs(varname, ref_date, spatial_domain, data_dir, workers):
     client = Client(n_workers=workers)
     
     # open connection to file
-    fp = data_dir.joinpath(luts.varnames_lu[varname]["filename"])
+    fp = data_dir.joinpath(luts.varnames_lu[varname]["anom_filename"])
     ds = xr.open_dataset(fp)
     
     # get the bbox for search
