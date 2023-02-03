@@ -17,7 +17,7 @@ def parse_args():
         type=str,
         help=(
             "Variable name to look for analogs. "
-            "Options are t2m (temperature), sst (sea surface temperature), msl (mean sea level pressure)"
+            "Options are t2m (temperature), sst (sea surface temperature), msl (mean sea level pressure), z (geopotential 500 hPa)"
         ),
         required=True
     )
@@ -36,11 +36,9 @@ def calculate_anomaly(da):
 if __name__ == "__main__":
     varname = parse_args()
     
-    client = Client(n_workers=16)
-    
     # open connection to file
     fp = data_dir.joinpath(luts.varnames_lu[varname]["filename"])
-    ds = xr.open_dataset(fp, chunks={"time": -1, "latitude": 40, "longitude": 40})
+    ds = xr.open_dataset(fp)
 
     # Probably a better way to do this but we just need to tell map_blocks what the resulting dataarray will look like,
     #  which is the same as the original dataarray but with the addition of a dayofyear coordinate variable indexed
@@ -54,7 +52,7 @@ if __name__ == "__main__":
             "latitude": ds.latitude,
             "longitude": ds.longitude
         },
-    ).chunk()
+    )
 
     daily_anom = da.map_blocks(calculate_anomaly, template=da)
     daily_anom.name = varname

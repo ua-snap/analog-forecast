@@ -19,6 +19,6 @@ if __name__ == "__main__":
     download(
         download_dir,
         "reanalysis-era5-pressure-levels",
-        "geopotential",
+        ["geopotential"],
         "500"
     )
