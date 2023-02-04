@@ -42,25 +42,47 @@ def parse_args():
     return args.varname, args.ref_date, args.spatial_domain, args.workers
 
 
-def get_rmse(da, ref_date, bbox):
+def get_rmse(sub_da, ref_date, bbox):
     """Get the RMSE between da at ref_time and every other preceding time slice. Calls compute() to process with dask.
     
     Args:
-        da (xarray.DataArray): dataarray of ERA5 data, with time, latitude, longitude axes
+        sub_da (xarray.DataArray): dataarray of ERA5 data, with time, latitude, longitude axes
         ref_date (str): reference date to compare all other preceding time slices against
         bbox (tuple): bounding box for subdomain selection
         
     Returns:
         rmse_da (xarra.DataArray): data array with an RMSE computed for each date preceding ref_date
     """
-    sub_da = da.sel(latitude=slice(bbox[3], bbox[1]), longitude=slice(bbox[0], bbox[2]))
     ref_da = sub_da.sel(time=ref_date).squeeze()
     end_search_date = pd.to_datetime(ref_date) - pd.to_timedelta(1, unit="d")
-    search_da = sub_da.sel(time=slice(da.time.values[0], end_search_date))
+    search_da = sub_da.sel(time=slice(sub_da.time.values[0], end_search_date))
     rmse_da = np.sqrt(((ref_da - search_da) ** 2).mean(axis=(0, 1)))
     
     # calls compute to run the computation with dask
     return rmse_da.compute()
+
+
+def spatial_subset(da, bbox):
+    """Subset the dataset. Allows using a bbox that crosses the antimeridian. 
+    Trying to reassing the longitude coordinate before subsetting was causing intense slowdowns with xarray for some reason. So this function actually divides a bbox into two chunks, loads the data for each, and then combines back into a single dataset on the [0, 360) scale. 
+    
+    Args:
+        da (xarray.DataArray): dataset with longitude coordinate variable on [-180, 180) scale
+        bbox (tuple): bounding box for subdomain selection where 0 <= bbox[0] < bbox[2] < 360
+    
+    Returns:
+        sub_da (xarray.DataArray): dataset with longitude coordinate variable on [0, 360) scale
+    """
+    varname = da.name
+    if 0 <= bbox[0] < bbox[2] < 360:
+        da_w = da.sel(latitude=slice(bbox[3], bbox[1]), longitude=slice(-180, (bbox[2] - 360))).load()
+        da_e = da.sel(latitude=slice(bbox[3], bbox[1]), longitude=slice(bbox[0], 180)).load()
+        da_w = da_w.assign_coords(longitude=da_w.longitude.values + 360)
+        sub_da = xr.combine_by_coords([da_w, da_e])[varname]
+    else:  
+        sub_da = da.sel(latitude=slice(bbox[3], bbox[1]), longitude=slice(bbox[0], bbox[2]))
+    
+    return sub_da
 
 
 def find_analogs(varname, ref_date, spatial_domain, data_dir, workers):
@@ -77,7 +99,7 @@ def find_analogs(varname, ref_date, spatial_domain, data_dir, workers):
         analogs (xarray.DataArray): data array of RMSE values and dates for 5 best analogs
     """
     # start dask cluster
-    client = Client(n_workers=workers)
+    client = Client(n_workers=workers, dashboard_address="localhost:33338")
     
     # open connection to file
     fp = data_dir.joinpath(luts.varnames_lu[varname]["anom_filename"])
@@ -85,10 +107,11 @@ def find_analogs(varname, ref_date, spatial_domain, data_dir, workers):
     
     # get the bbox for search
     bbox = luts.spatial_domains[spatial_domain]["bbox"]
+    sub_da = spatial_subset(ds[varname], bbox)
     
     # compute RMSE between ref_date and all preceding dates 
     #  for the specified variable and spatial domain
-    rmse_da = get_rmse(ds[varname], ref_date, bbox)
+    rmse_da = get_rmse(sub_da, ref_date, bbox)
     
     # sort before dropping duplicated years
     rmse_da = rmse_da.sortby(rmse_da)
@@ -135,6 +158,10 @@ def make_forecast(analogs, varname, ref_date, spatial_domain, data_dir):
     # susbet the data spatially as was done for analogs, then extract
     #  the next 14 days following the analog date
     with xr.open_dataset(fp) as ds:
+        # again, reindex longitude for north pacific domain
+        if spatial_domain == "north_pacific": 
+            ds = reindex_longitude(ds)
+        
         ds = ds.sel(
             latitude=slice(bbox[3], bbox[1]),
             longitude=slice(bbox[0], bbox[2])

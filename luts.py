@@ -24,6 +24,7 @@ spatial_domains = {
     "alaska": {"bbox": (-180, 44, -125, 76)},
     "northern_hs": {"bbox": (-180, 0, 180, 90)},
     "panarctic": {"bbox": (-180, 55, 180, 90)},
+    "north_pacific": {"bbox": (120, 0, 240, 90)}
 }
 
 
