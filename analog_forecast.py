@@ -85,7 +85,7 @@ def spatial_subset(da, bbox):
     return sub_da
 
 
-def find_analogs(varname, ref_date, spatial_domain, data_dir, workers):
+def find_analogs(varname, ref_date, spatial_domain, data_dir, workers, use_anom):
     """Find the analogs. Starts and stops a dask cluster for the processing. 
     
     Args:
@@ -94,6 +94,7 @@ def find_analogs(varname, ref_date, spatial_domain, data_dir, workers):
         spatial_domain (str): name of the spatial domain to use
         data_dir (pathlib.PosixPath): path to the directory containing the ERA5 data files
         workers (int): number of dask workers to use for localcluster
+        use_anom (bool): whether or not to use anomalies for analog search
         
     Returns:
         analogs (xarray.DataArray): data array of RMSE values and dates for 5 best analogs
@@ -102,7 +103,11 @@ def find_analogs(varname, ref_date, spatial_domain, data_dir, workers):
     client = Client(n_workers=workers, dashboard_address="localhost:33338")
     
     # open connection to file
-    fp = data_dir.joinpath(luts.varnames_lu[varname]["anom_filename"])
+    if use_anom:
+        fp_lu_key = "anom_filename"
+    else:
+        fp_lu_key = "filename"
+    fp = data_dir.joinpath(luts.varnames_lu[varname][fp_lu_key])
     ds = xr.open_dataset(fp)
     
     # get the bbox for search
@@ -153,29 +158,23 @@ def make_forecast(analogs, varname, ref_date, spatial_domain, data_dir):
     bbox = luts.spatial_domains[spatial_domain]["bbox"]
     
     # get filepath to data file used
+    # These will be for forecasts only so we want the real data, not anomaly
     fp = data_dir.joinpath(luts.varnames_lu[varname]["filename"])
     
     # susbet the data spatially as was done for analogs, then extract
     #  the next 14 days following the analog date
-    with xr.open_dataset(fp) as ds:
-        # again, reindex longitude for north pacific domain
-        if spatial_domain == "north_pacific": 
-            ds = reindex_longitude(ds)
+    with xr.open_dataset(fp) as ds:        
+        # get the bbox for search
+        bbox = luts.spatial_domains[spatial_domain]["bbox"]
+        sub_da = spatial_subset(ds[varname], bbox)
         
-        ds = ds.sel(
-            latitude=slice(bbox[3], bbox[1]),
-            longitude=slice(bbox[0], bbox[2])
-        )
         arr = []
         for t in analogs.time:
             time_sl = slice(
                 t + pd.to_timedelta(1, unit="d"),
                 t + pd.to_timedelta(14, unit="d")
             )
-            arr.append(ds[varname].sel(
-                time=time_sl,
-
-            ).values)
+            arr.append(sub_da.sel(time=time_sl).values)
     # take mean over axis 0 (year/analog axis) to get the forecast
     #  will have shape of (14, n_lat, n_lon)
     composite = np.array(arr).mean(axis=0)
@@ -189,8 +188,8 @@ def make_forecast(analogs, varname, ref_date, spatial_domain, data_dir):
         data=composite,
         dims=ds[varname].dims,
         coords=dict(
-            longitude=(["longitude"], ds.longitude.data),
-            latitude=(["latitude"], ds.latitude.data),
+            longitude=(["longitude"], sub_da.longitude.data),
+            latitude=(["latitude"], sub_da.latitude.data),
             time=time,
         ),
     )
