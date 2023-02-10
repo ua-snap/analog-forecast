@@ -42,20 +42,19 @@ def parse_args():
     return args.varname, args.ref_date, args.spatial_domain, args.workers
 
 
-def get_rmse(sub_da, ref_date, bbox):
+def run_rmse_over_time(da, ref_date):
     """Get the RMSE between da at ref_time and every other preceding time slice. Calls compute() to process with dask.
     
     Args:
-        sub_da (xarray.DataArray): dataarray of ERA5 data, with time, latitude, longitude axes
+        da (xarray.DataArray): dataarray of ERA5 data, with time, latitude, longitude axes
         ref_date (str): reference date to compare all other preceding time slices against
-        bbox (tuple): bounding box for subdomain selection
         
     Returns:
         rmse_da (xarra.DataArray): data array with an RMSE computed for each date preceding ref_date
     """
-    ref_da = sub_da.sel(time=ref_date).squeeze()
+    ref_da = da.sel(time=ref_date).squeeze()
     end_search_date = pd.to_datetime(ref_date) - pd.to_timedelta(1, unit="d")
-    search_da = sub_da.sel(time=slice(sub_da.time.values[0], end_search_date))
+    search_da = da.sel(time=slice(da.time.values[0], end_search_date))
     rmse_da = np.sqrt(((ref_da - search_da) ** 2).mean(axis=(0, 1)))
     
     # calls compute to run the computation with dask
@@ -85,38 +84,57 @@ def spatial_subset(da, bbox):
     return sub_da
 
 
-def find_analogs(varname, ref_date, spatial_domain, data_dir, workers, use_anom):
-    """Find the analogs. Starts and stops a dask cluster for the processing. 
+def read_subset_era5(spatial_domain, data_dir, varname, use_anom):
+    """Opens a connection to the ERA5 dataset for the variable of interest and subsets to the specified spatial region.
     
     Args:
-        varname (str): name of variable to search analogs based on
-        ref_date (str): reference date in formate YYYY-mm-dd
-        spatial_domain (str): name of the spatial domain to use
-        data_dir (pathlib.PosixPath): path to the directory containing the ERA5 data files
-        workers (int): number of dask workers to use for localcluster
-        use_anom (bool): whether or not to use anomalies for analog search
+        spatial_domain (str): name of the spatial domain to subset to
+        data_dir (pathlib.PosixPath): path to directory containing ERA5 data
+        varname (str): name of the variable being used
+        use_anom (bool): whether or not to use anomalies
         
     Returns:
-        analogs (xarray.DataArray): data array of RMSE values and dates for 5 best analogs
+        sub_da (xarray.DataArray): data array of ERA5 data subset to the spatial domain of interest
     """
-    # start dask cluster
-    client = Client(n_workers=workers, dashboard_address="localhost:33338")
-    
+    # get the bbox
+    bbox = luts.spatial_domains[spatial_domain]["bbox"]
+
+    # get filepath to data file used
+    # These will be for forecasts only so we want the real data, not anomaly
     # open connection to file
     if use_anom:
         fp_lu_key = "anom_filename"
     else:
         fp_lu_key = "filename"
     fp = data_dir.joinpath(luts.varnames_lu[varname][fp_lu_key])
-    ds = xr.open_dataset(fp)
+
+    # susbet the data spatially as was done for analogs, then extract
+    #  the next 14 days following the analog date
+    with xr.open_dataset(fp) as ds:        
+        sub_da = spatial_subset(ds[varname], bbox)
+        
+    return sub_da
+
+
+def find_analogs(varname, ref_date, spatial_domain, data_dir, workers, use_anom):
+    """Find the analogs.
     
-    # get the bbox for search
-    bbox = luts.spatial_domains[spatial_domain]["bbox"]
-    sub_da = spatial_subset(ds[varname], bbox)
+    Args:
+        varname (str): name of variable to search analogs based on
+        ref_date (str): reference date in formate YYYY-mm-dd
+        spatial_domain (str): name of the spatial domain to use
+        data_dir (pathlib.PosixPath): path to the directory containing the ERA5 data files
+        use_anom (bool): whether or not to use anomalies for analog search
+        
+    Returns:
+        analogs (xarray.DataArray): data array of RMSE values and dates for 5 best analogs
+    """
+    # get the ERA5 data for searching
+    sub_da = read_subset_era5(spatial_domain, data_dir, varname, use_anom)
     
     # compute RMSE between ref_date and all preceding dates 
     #  for the specified variable and spatial domain
-    rmse_da = get_rmse(sub_da, ref_date, bbox)
+    rmse_da = run_rmse_over_time(sub_da, ref_date)
     
     # sort before dropping duplicated years
     rmse_da = rmse_da.sortby(rmse_da)
@@ -136,45 +154,28 @@ def find_analogs(varname, ref_date, spatial_domain, data_dir, workers, use_anom)
     ):
         print(f"Rank {rank}:   Date: {date:%Y-%m-%d};  RMSE: {round(rmse, 3):.3f}")
     
-    ds.close()
-    client.close()
-    
     return analogs
 
 
-def make_forecast(analogs, varname, ref_date, spatial_domain, data_dir):
+def make_forecast(sub_da, times, ref_date):
     """Use a dataarray of analogs containing dates to create a composite forecast for 14 days following reference date
     
     Args:
-        analogs (xarray.DataArray): data array of RMSE values and dates for 5 best analogs
+        sub_da (xarray.DataArray): data array of ERA5 data for variable and region of interest
+        times (list): list of times to generate forecast from
         ref_date (str): reference date in formate YYYY-mm-dd
-        spatial_domain (str): name of the spatial domain to use
-        data_dir (pathlib.PosixPath): path to the directory containing the ERA5 data files
     
     Returns:
         forecast (xarray.DataArray): forecast values computed for the 14 days following ref_date. Computed as the mean of corresponding days following each analog. 
     """
-    # get the bbox for composite mean/"forecast"
-    bbox = luts.spatial_domains[spatial_domain]["bbox"]
-    
-    # get filepath to data file used
-    # These will be for forecasts only so we want the real data, not anomaly
-    fp = data_dir.joinpath(luts.varnames_lu[varname]["filename"])
-    
-    # susbet the data spatially as was done for analogs, then extract
-    #  the next 14 days following the analog date
-    with xr.open_dataset(fp) as ds:        
-        # get the bbox for search
-        bbox = luts.spatial_domains[spatial_domain]["bbox"]
-        sub_da = spatial_subset(ds[varname], bbox)
-        
-        arr = []
-        for t in analogs.time:
-            time_sl = slice(
-                t + pd.to_timedelta(1, unit="d"),
-                t + pd.to_timedelta(14, unit="d")
-            )
-            arr.append(sub_da.sel(time=time_sl).values)
+    arr = []
+    for t in times:
+        time_sl = slice(
+            t + pd.to_timedelta(1, unit="d"),
+            t + pd.to_timedelta(14, unit="d")
+        )
+        arr.append(sub_da.sel(time=time_sl).values)
+
     # take mean over axis 0 (year/analog axis) to get the forecast
     #  will have shape of (14, n_lat, n_lon)
     composite = np.array(arr).mean(axis=0)
@@ -186,7 +187,7 @@ def make_forecast(analogs, varname, ref_date, spatial_domain, data_dir):
     )
     forecast = xr.DataArray(
         data=composite,
-        dims=ds[varname].dims,
+        dims=sub_da.dims,
         coords=dict(
             longitude=(["longitude"], sub_da.longitude.data),
             latitude=(["latitude"], sub_da.latitude.data),
@@ -199,5 +200,10 @@ def make_forecast(analogs, varname, ref_date, spatial_domain, data_dir):
 if __name__ == "__main__":
     # parse some args
     varname, ref_date, spatial_domain, workers = parse_args()
-    analogs = find_analogs(varname, ref_date, spatial_domain, data_dir, workers)
     
+    # start dask cluster
+    client = Client(n_workers=workers, dashboard_address="localhost:33338")
+    # run analog search
+    analogs = find_analogs(varname, ref_date, spatial_domain, data_dir)
+    # close cluster
+    client.close()
