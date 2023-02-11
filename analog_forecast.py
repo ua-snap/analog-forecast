@@ -116,7 +116,7 @@ def read_subset_era5(spatial_domain, data_dir, varname, use_anom):
     return sub_da
 
 
-def find_analogs(varname, ref_date, spatial_domain, data_dir, workers, use_anom):
+def find_analogs(varname, ref_date, spatial_domain, data_dir, workers, use_anom, print_analogs=False):
     """Find the analogs.
     
     Args:
@@ -125,6 +125,7 @@ def find_analogs(varname, ref_date, spatial_domain, data_dir, workers, use_anom)
         spatial_domain (str): name of the spatial domain to use
         data_dir (pathlib.PosixPath): path to the directory containing the ERA5 data files
         use_anom (bool): whether or not to use anomalies for analog search
+        print_analogs (bool): print the top 5 analogs and scores
         
     Returns:
         analogs (xarray.DataArray): data array of RMSE values and dates for 5 best analogs
@@ -147,13 +148,14 @@ def find_analogs(varname, ref_date, spatial_domain, data_dir, workers, use_anom)
     analogs = rmse_da.isel(time=keep_indices)
     # subset to first 5 analogs for now
     analogs = analogs.isel(time=slice(5))
-
-    print("   Top 5 Analogs: ")
-    for rank, date, rmse in zip(
-        [1, 2, 3, 4, 5], pd.to_datetime(analogs.time.values), analogs.values
-    ):
-        print(f"Rank {rank}:   Date: {date:%Y-%m-%d};  RMSE: {round(rmse, 3):.3f}")
     
+    if print_analogs:
+        print("   Top 5 Analogs: ")
+        for rank, date, rmse in zip(
+            [1, 2, 3, 4, 5], pd.to_datetime(analogs.time.values), analogs.values
+        ):
+            print(f"Rank {rank}:   Date: {date:%Y-%m-%d};  RMSE: {round(rmse, 3):.3f}")
+
     return analogs
 
 
