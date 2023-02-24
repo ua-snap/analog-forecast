@@ -42,27 +42,8 @@ def parse_args():
     return args.varname, args.ref_date, args.spatial_domain, args.workers
 
 
-def run_rmse_over_time(da, ref_date):
-    """Get the RMSE between da at ref_time and every other preceding time slice. Calls compute() to process with dask.
-    
-    Args:
-        da (xarray.DataArray): dataarray of ERA5 data, with time, latitude, longitude axes
-        ref_date (str): reference date to compare all other preceding time slices against
-        
-    Returns:
-        rmse_da (xarra.DataArray): data array with an RMSE computed for each date preceding ref_date
-    """
-    ref_da = da.sel(time=ref_date).squeeze()
-    end_search_date = pd.to_datetime(ref_date) - pd.to_timedelta(1, unit="d")
-    search_da = da.sel(time=slice(da.time.values[0], end_search_date))
-    rmse_da = np.sqrt(((ref_da - search_da) ** 2).mean(axis=(0, 1)))
-    
-    # calls compute to run the computation with dask
-    return rmse_da.compute()
-
-
 def spatial_subset(da, bbox):
-    """Subset the dataset. Allows using a bbox that crosses the antimeridian. 
+    """Subset a DataArray spatially. Allows using a bbox that crosses the antimeridian. 
     Trying to reassing the longitude coordinate before subsetting was causing intense slowdowns with xarray for some reason. So this function actually divides a bbox into two chunks, loads the data for each, and then combines back into a single dataset on the [0, 360) scale. 
     
     Args:
@@ -116,6 +97,78 @@ def read_subset_era5(spatial_domain, data_dir, varname, use_anom):
     return sub_da
 
 
+def get_search_da(da, ref_date, window):
+    """Temporally subset a DataArray to only the desired timestamps for searching for analogs, based on method
+    
+    Args:
+        da (xarray.DataArray): ERA5 dataArray, with time, latitude, longitude axes
+        ref_date (str): reference date to compare all other preceding time slices against
+        temporal_search_method (str): method for temporal search, passed to get_search_da
+        
+    Returns:
+        search_da ((xarray.DataArray): data array to be searched for analogs
+    """
+    if window == "precede": 
+        end_search_date = pd.to_datetime(ref_date) - pd.to_timedelta(1, unit="d")
+        search_da = da.sel(time=slice(da.time.values[0], end_search_date))
+    elif window == "any": 
+        # all timestamps considered except those which cannot allow
+        #  14 day forecasts (i.e. the last 14 timestamps) and the reference date
+        end_search_date = da.time.values[-1] - pd.to_timedelta(15, unit="d")
+        search_da = da.sel(time=slice(da.time.values[0], end_search_date))
+        search_da = search_da.where(search_da.time != pd.to_datetime(ref_date + " 12:00:00"), drop=True)
+        
+    return search_da
+
+
+def run_rmse_over_time(da, ref_date, window):
+    """Get the RMSE between da at ref_time and every other preceding time slice. Calls compute() to process with dask.
+    
+    Args:
+        da (xarray.DataArray): ERA5 dataArray, with time, latitude, longitude axes
+        ref_date (str): reference date to compare all other preceding time slices against
+        window (str): method for temporal search, passed to get_search_da
+        
+    Returns:
+        rmse_da (xarra.DataArray): data array with an RMSE computed for each date preceding ref_date
+    """
+    ref_da = da.sel(time=ref_date).squeeze()
+    search_da = get_search_da(da, ref_date, window)
+    rmse_da = np.sqrt(((ref_da - search_da) ** 2).mean(axis=(0, 1)))
+    
+    # calls compute to run the computation with dask
+    return rmse_da.compute()
+
+
+def take_analogs(error_da, buffer, n=5):
+    """Take the top n times from error_da ('top' == smallest error) with constraints on how close in time these top times may be.
+    
+    Args:
+        error_da (xarray.DataArray): error values indexed by time
+        buffer (int): number of days to buffer each top time for excluding subsequent times
+        n (int): number of analogs to keep
+        
+    Returns:
+        analogs (xarray.DataArray): top n analogs taken from error_da
+    """
+    # sort ascending
+    error_da = error_da.sortby(error_da)
+    # iterate over list of top analogs and create a window that others must not overlap, lest they be discarded
+    analog_buffer_ranges = []
+    analog_times = []
+    td_buffer = pd.to_timedelta(buffer, "d")
+    for t in error_da.time.values:
+        if not any([t in dr for dr in analog_buffer_ranges]):
+            analog_buffer_ranges.append(pd.date_range(t - td_buffer, t + td_buffer))
+            analog_times.append(t)
+        if len(analog_buffer_ranges) == 5:
+            break
+
+    analogs = error_da.sel(time=analog_times)
+
+    return analogs
+
+
 def find_analogs(varname, ref_date, spatial_domain, data_dir, workers, use_anom, print_analogs=False):
     """Find the analogs.
     
@@ -135,19 +188,16 @@ def find_analogs(varname, ref_date, spatial_domain, data_dir, workers, use_anom,
     
     # compute RMSE between ref_date and all preceding dates 
     #  for the specified variable and spatial domain
-    rmse_da = run_rmse_over_time(sub_da, ref_date)
+    rmse_da = run_rmse_over_time(sub_da, ref_date, "any")
     
-    # sort before dropping duplicated years
-    rmse_da = rmse_da.sortby(rmse_da)
-    # drop duplicated years.
-    # This is being done because analogs might occur in the same year as the
-    #  reference date and notes from meetings with collaborators indicate that
-    #  there should only be one analog per year, as was the case for the
-    #  previous iteration of the algorithm.
-    keep_indices = ~pd.Series(rmse_da.time.dt.year).duplicated()
-    analogs = rmse_da.isel(time=keep_indices)
     # subset to first 5 analogs for now
-    analogs = analogs.isel(time=slice(5))
+    # impose restrictions on temporal proximity for analog based on variable.
+    #  if SST, then we use an exclusion buffer of 6 months, atmospheric vars use 30 days
+    if varname in ["t2m", "msl", "z"]:
+        buffer = 30
+    elif varname in ["sst"]:
+        buffer = 180
+    analogs = take_analogs(rmse_da, buffer, 5)
     
     if print_analogs:
         print("   Top 5 Analogs: ")
