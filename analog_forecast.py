@@ -169,23 +169,17 @@ def take_analogs(error_da, buffer, n=5):
     return analogs
 
 
-def find_analogs(varname, ref_date, spatial_domain, data_dir, workers, use_anom, print_analogs=False):
+def find_analogs(da, ref_date, print_analogs=False):
     """Find the analogs.
     
     Args:
-        varname (str): name of variable to search analogs based on
+        da (xarray.DataArray): data array of ERA5 data (likely already subset to area of interest)
         ref_date (str): reference date in formate YYYY-mm-dd
-        spatial_domain (str): name of the spatial domain to use
-        data_dir (pathlib.PosixPath): path to the directory containing the ERA5 data files
-        use_anom (bool): whether or not to use anomalies for analog search
         print_analogs (bool): print the top 5 analogs and scores
         
     Returns:
         analogs (xarray.DataArray): data array of RMSE values and dates for 5 best analogs
     """
-    # get the ERA5 data for searching
-    sub_da = read_subset_era5(spatial_domain, data_dir, varname, use_anom)
-    
     # compute RMSE between ref_date and all preceding dates 
     #  for the specified variable and spatial domain
     rmse_da = run_rmse_over_time(sub_da, ref_date, "any")
@@ -249,6 +243,7 @@ def make_forecast(sub_da, times, ref_date):
     
     return forecast
 
+
 if __name__ == "__main__":
     # parse some args
     varname, ref_date, spatial_domain, workers = parse_args()
@@ -256,6 +251,8 @@ if __name__ == "__main__":
     # start dask cluster
     client = Client(n_workers=workers, dashboard_address="localhost:33338")
     # run analog search
-    analogs = find_analogs(varname, ref_date, spatial_domain, data_dir)
+    # get the ERA5 data for searching
+    sub_da = read_subset_era5(spatial_domain, data_dir, varname, use_anom)
+    analogs = find_analogs(da, ref_date, print_analogs=True)
     # close cluster
     client.close()
