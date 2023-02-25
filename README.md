@@ -12,3 +12,14 @@ Make forecasts from similar meteorological conditions (analogs) using ERA5.
 ```
 python analog_forecast.py -v sst -d 2021-12-01 -s alaska
 ```
+
+## Contents
+
+### `skill_profiling/`
+
+The contents of this subfolder are for evaluating the skill of the analog forecast method. To work with the code there, set the `PROJECT_DIR` environment variable to the path of this repo on the local filesystem and add it to the `PYTHONPATH` variable, e.g. run the following from the directory containing this file:
+
+```
+export PROJECT_DIR=$PWD
+export PYTHONPATH=$PYTHONPATH:$PROJECT_DIR
+```
