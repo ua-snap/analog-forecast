@@ -171,6 +171,21 @@ if __name__ == "__main__":
     luts = load_module(project_dir.joinpath("luts.py"), "luts")
     af = load_module(project_dir.joinpath("analog_forecast.py"), "af")
     
+    # set up the reference dates we will be using
+    ref_dates = ["2004-10-11", "2004-10-18", "2005-09-22", "2013-11-06", "2004-05-09", "2015-11-09", "2015-11-23"]
+    # ok and the reference dates we actually want are the dates which precede these dates by 3 and 5 days,
+    #  so that the forecasts start 3 and 5 days ahead of these reference dates
+    ref_dates = [
+        (pd.to_datetime(date) - pd.to_timedelta(3, unit="d")).strftime("%Y-%m-%d")
+        for date in ref_dates
+    ] + [
+        (pd.to_datetime(date) - pd.to_timedelta(5, unit="d")).strftime("%Y-%m-%d")
+        for date in ref_dates
+    ]
+    # arbitrary reference date for naive forecasts
+    naive_ref_date = ref_dates[0]
+    
+    # load the data - strategy is to just load all the data, then iterate over domains
     fp_lu_key = {True: "anom_filename", False: "filename"}[use_anom]
     fp = data_dir.joinpath(luts.varnames_lu[varname][fp_lu_key])
     ds = xr.load_dataset(fp)
