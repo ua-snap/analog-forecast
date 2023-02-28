@@ -182,7 +182,8 @@ def find_analogs(da, ref_date, print_analogs=False):
     """
     # compute RMSE between ref_date and all preceding dates 
     #  for the specified variable and spatial domain
-    rmse_da = run_rmse_over_time(sub_da, ref_date, "any")
+    rmse_da = run_rmse_over_time(da, ref_date, "any")
+    varname = da.name
     
     # subset to first 5 analogs for now
     # impose restrictions on temporal proximity for analog based on variable.

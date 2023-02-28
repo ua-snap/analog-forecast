@@ -1,10 +1,18 @@
 """Worker script to profile the analog method for a certain variable and data type. Will execute the analog forecast algorithm and compute the forecast error for multiple reference dates and write results to disk.
 """
 
+import argparse
+import importlib.util
+import os
+import sys
 from pathlib import Path
 import numpy as np
 import pandas as pd
 import xarray as xr
+# local imports available with modified PYTHONPATH
+import luts
+from config import data_dir
+from analog_forecast import make_forecast, find_analogs, spatial_subset
 
 
 def parse_args():
@@ -13,10 +21,7 @@ def parse_args():
     parser.add_argument(
         "--varname",
         type=str,
-        help=(
-            "Variable name to look for analogs. "
-            f"Options are {', '.join(list(luts.varname_lu.keys()))}"
-        ),
+        help="Variable name.",
         required=True
     )
     parser.add_argument(
@@ -69,14 +74,14 @@ def forecast_and_error(da, times, ref_date):
     Returns:
         the forecast error, only RMSE supported for now
     """
-    forecast = af.make_forecast(da, times, ref_date)
+    forecast = make_forecast(da, times, ref_date)
     err = da.sel(time=forecast.time.values) - forecast
     
     return (err ** 2).mean(axis=(1, 2)).drop("time")
 
 
 def run_analog_forecast(da, ref_date, raw_da=None):
-    analogs = af.find_analogs(da, ref_date)
+    analogs = find_analogs(da, ref_date)
     if raw_da is not None:
         # raw_da will be supplied if da is anomaly data
         #  it will be needed for generating forecasts
@@ -167,9 +172,6 @@ def profile_naive_forecast(da, n=1000, ncpus=16):
 
 if __name__ == "__main__":
     varname, use_anom, results_fp, workers = parse_args()
-    project_dir = Path(os.getenv("PROJECT_DIR"))
-    luts = load_module(project_dir.joinpath("luts.py"), "luts")
-    af = load_module(project_dir.joinpath("analog_forecast.py"), "af")
     
     # set up the reference dates we will be using
     ref_dates = ["2004-10-11", "2004-10-18", "2005-09-22", "2013-11-06", "2004-05-09", "2015-11-09", "2015-11-23"]
@@ -188,8 +190,10 @@ if __name__ == "__main__":
     # load the data - strategy is to just load all the data, then iterate over domains
     fp_lu_key = {True: "anom_filename", False: "filename"}[use_anom]
     fp = data_dir.joinpath(luts.varnames_lu[varname][fp_lu_key])
+    print("Reading in search data")
     ds = xr.load_dataset(fp)
     if use_anom:
+        print("Reading in raw data for forecasting with anomaly analogs")
         # also will load raw data if anomaly search is used
         raw_ds = xr.load_dataset(data_dir.joinpath(luts.varnames_lu[varname]["filename"]))
     else:
@@ -199,6 +203,7 @@ if __name__ == "__main__":
     naive_results = []
     
     for spatial_domain in luts.spatial_domains:
+        print(f"Working on {spatial_domain}")
         bbox = luts.spatial_domains[spatial_domain]["bbox"]
         sub_da = spatial_subset(ds[varname], bbox)
         if raw_ds is not None:
@@ -216,4 +221,4 @@ if __name__ == "__main__":
     analog_df = pd.concat(analog_results)
     
     analog_df.round(3).to_csv(results_fp, index=False)
-    naive_df.round(3).to_csv(results_fp.name.replace(".py", "_naive.py"), index=False)
+    naive_df.round(3).to_csv(results_fp.name.replace(".csv", "_naive.csv"), index=False)
