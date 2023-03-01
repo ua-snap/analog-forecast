@@ -108,15 +108,22 @@ def get_search_da(da, ref_date, window):
     Returns:
         search_da ((xarray.DataArray): data array to be searched for analogs
     """
-    if window == "precede": 
-        end_search_date = pd.to_datetime(ref_date) - pd.to_timedelta(1, unit="d")
+    if window == "precede":
+        # don't want to accept analogs that are withing 15 days of the reference date
+        end_search_date = pd.to_datetime(ref_date) - pd.to_timedelta(15, unit="d")
         search_da = da.sel(time=slice(da.time.values[0], end_search_date))
     elif window == "any": 
-        # all timestamps considered except those which cannot allow
-        #  14 day forecasts (i.e. the last 14 timestamps) and the reference date
+        # all timestamps considered except those which cannot allow 14 day forecasts
+        #  (i.e. the last 14 timestamps and the 14 dates before and after the reference date)
         end_search_date = da.time.values[-1] - pd.to_timedelta(15, unit="d")
         search_da = da.sel(time=slice(da.time.values[0], end_search_date))
-        search_da = search_da.where(search_da.time != pd.to_datetime(ref_date + " 12:00:00"), drop=True)
+        
+        ref_dtime = pd.to_datetime(ref_date + " 12:00:00")
+        ref_window = pd.date_range(
+            ref_dtime - pd.to_timedelta(15, "d"),
+            ref_dtime + pd.to_timedelta(14, "d")
+        )
+        search_da = search_da.where(~search_da.time.isin(ref_window), drop=True)
         
     return search_da
 
@@ -163,12 +170,13 @@ def run_rmse_over_time(da, ref_date, window):
     return rmse_da
 
 
-def take_analogs(error_da, buffer, n=5):
+def take_analogs(error_da, buffer, ref_date, n=5):
     """Take the top n times from error_da ('top' == smallest error) with constraints on how close in time these top times may be.
     
     Args:
         error_da (xarray.DataArray): error values indexed by time
         buffer (int): number of days to buffer each top time for excluding subsequent times
+        ref_date (str): 
         n (int): number of analogs to keep
         
     Returns:
@@ -215,7 +223,7 @@ def find_analogs(da, ref_date, print_analogs=False):
         buffer = 30
     elif varname in ["sst"]:
         buffer = 180
-    analogs = take_analogs(rmse_da, buffer, 5)
+    analogs = take_analogs(rmse_da, buffer, ref_date, 5)
     
     if print_analogs:
         print("   Top 5 Analogs: ")
