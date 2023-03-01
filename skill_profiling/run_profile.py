@@ -44,25 +44,6 @@ def parse_args():
     return args.varname, args.use_anom, Path(args.results_file), args.workers
 
 
-def load_module(fp, name):
-    """Load a module by absolute path.
-    
-    Args:
-        fp (path-like): path to module to load
-        name (str): name of the module
-        
-    Returns:
-        module object
-    """
-    # import modules from project
-    spec = importlib.util.spec_from_file_location(name, fp)
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules[name] = mod
-    spec.loader.exec_module(mod)
-    
-    return mod
-
-
 def forecast_and_error(da, times, ref_date):
     """Construct a forecast using times and a reference date, and return the error values
     
@@ -143,7 +124,7 @@ def get_naive_sample_dates(all_times, naive_ref_date):
     return all_dates, analog_times
 
 
-def profile_naive_forecast(da, n=1000, ncpus=16):
+def profile_naive_forecast(da, n=1000):
     """Profiles the naive forecast method using a single data array with time, latitude, and longitude dimensions.
     Return a dataframe of results.
     """
@@ -190,10 +171,10 @@ if __name__ == "__main__":
     # load the data - strategy is to just load all the data, then iterate over domains
     fp_lu_key = {True: "anom_filename", False: "filename"}[use_anom]
     fp = data_dir.joinpath(luts.varnames_lu[varname][fp_lu_key])
-    print("Reading in search data")
+    print("Reading in search data", flush=True)
     ds = xr.load_dataset(fp)
     if use_anom:
-        print("Reading in raw data for forecasting with anomaly analogs")
+        print("Reading in raw data for forecasting with anomaly analogs", flush=True)
         # also will load raw data if anomaly search is used
         raw_ds = xr.load_dataset(data_dir.joinpath(luts.varnames_lu[varname]["filename"]))
     else:
@@ -203,7 +184,7 @@ if __name__ == "__main__":
     naive_results = []
     
     for spatial_domain in luts.spatial_domains:
-        print(f"Working on {spatial_domain}")
+        print(f"Working on {spatial_domain}", flush=True)
         bbox = luts.spatial_domains[spatial_domain]["bbox"]
         sub_da = spatial_subset(ds[varname], bbox)
         if raw_ds is not None:
@@ -221,4 +202,5 @@ if __name__ == "__main__":
     analog_df = pd.concat(analog_results)
     
     analog_df.round(3).to_csv(results_fp, index=False)
-    naive_df.round(3).to_csv(results_fp.name.replace(".csv", "_naive.csv"), index=False)
+    naive_fp = results_fp.parent.joinpath(results_fp.name.replace(".csv", "_naive.csv"))
+    naive_df.round(3).to_csv(naive_fp, index=False)
