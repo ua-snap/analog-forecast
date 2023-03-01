@@ -121,6 +121,30 @@ def get_search_da(da, ref_date, window):
     return search_da
 
 
+def rmse(da, ref_da):
+    """Compute the RMSE between each time slice in da and ref_date
+    
+    Args:
+        da (xarray.DataArray): data array with time, latitude, and longitude dims for computing RMSE over the spatial dimensions
+        ref_da (xarray.DataArray): reference data array with only spatial axes (2d grid) to compute RMSE against
+        
+    Returns:
+        rmse_da (xarrya.DataArray): data array where each time step is the RMSE between da at that same time step and ref_da
+    """
+    # rmse_da = np.sqrt(((da - ref_da) ** 2).mean(axis=(1, 2)))
+    
+    rmse_arr = np.sqrt(np.apply_over_axes(np.mean, (da - ref_da) ** 2, axes=[1,2]).squeeze())
+    rmse_da = xr.DataArray(
+        data=rmse_arr,
+        dims=["time"],
+        coords=dict(
+            time=da.time.values,
+        ),
+    )
+    
+    return rmse_da
+
+
 def run_rmse_over_time(da, ref_date, window):
     """Get the RMSE between da at ref_time and every other preceding time slice. Calls compute() to process with dask.
     
@@ -134,10 +158,9 @@ def run_rmse_over_time(da, ref_date, window):
     """
     ref_da = da.sel(time=ref_date).squeeze()
     search_da = get_search_da(da, ref_date, window)
-    rmse_da = np.sqrt(((ref_da - search_da) ** 2).mean(axis=(0, 1)))
+    rmse_da = rmse(search_da, ref_da)
     
-    # calls compute to run the computation with dask
-    return rmse_da.compute()
+    return rmse_da
 
 
 def take_analogs(error_da, buffer, n=5):
