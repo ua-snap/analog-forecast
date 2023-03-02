@@ -138,8 +138,6 @@ def rmse(da, ref_da):
     Returns:
         rmse_da (xarrya.DataArray): data array where each time step is the RMSE between da at that same time step and ref_da
     """
-    # rmse_da = np.sqrt(((da - ref_da) ** 2).mean(axis=(1, 2)))
-    
     rmse_arr = np.sqrt(np.apply_over_axes(np.nanmean, (da - ref_da) ** 2, axes=[1,2]).squeeze())
     rmse_da = xr.DataArray(
         data=rmse_arr,
