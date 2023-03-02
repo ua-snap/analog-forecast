@@ -58,7 +58,7 @@ def forecast_and_error(da, times, ref_date):
     forecast = make_forecast(da, times, ref_date)
     err = da.sel(time=forecast.time.values) - forecast
     
-    return (err ** 2).mean(axis=(1, 2)).drop("time")
+    return np.sqrt((err ** 2).mean(axis=(1, 2)).drop("time"))
 
 
 def run_analog_forecast(da, ref_date, raw_da=None):
