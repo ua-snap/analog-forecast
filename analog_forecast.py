@@ -140,7 +140,7 @@ def rmse(da, ref_da):
     """
     # rmse_da = np.sqrt(((da - ref_da) ** 2).mean(axis=(1, 2)))
     
-    rmse_arr = np.sqrt(np.apply_over_axes(np.mean, (da - ref_da) ** 2, axes=[1,2]).squeeze())
+    rmse_arr = np.sqrt(np.apply_over_axes(np.nanmean, (da - ref_da) ** 2, axes=[1,2]).squeeze())
     rmse_da = xr.DataArray(
         data=rmse_arr,
         dims=["time"],
@@ -231,7 +231,9 @@ def find_analogs(da, ref_date, print_analogs=False):
             [1, 2, 3, 4, 5], pd.to_datetime(analogs.time.values), analogs.values
         ):
             print(f"Rank {rank}:   Date: {date:%Y-%m-%d};  RMSE: {round(rmse, 3):.3f}")
-
+    
+    assert ~any(np.isnan(analogs))
+    
     return analogs
 
 
