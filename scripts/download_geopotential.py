@@ -7,7 +7,7 @@ from pathlib import Path
 import cdsapi
 # local
 from download_era5 import download
-    
+from config import clim_cretrieve_kwargs
     
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
@@ -16,9 +16,12 @@ if __name__ == "__main__":
     download_dir = Path(args.download_dir)
     
     logging.basicConfig(level=logging.INFO)
+    clim_cretrieve_kwargs.update({"pressure_level": "500"})
+    
     download(
-        download_dir,
-        "reanalysis-era5-pressure-levels",
-        ["geopotential"],
-        "500"
+        download_dir=download_dir,
+        dataset="reanalysis-era5-pressure-levels",
+        varnames=["geopotential"],
+        cretrieve_kwargs=clim_cretrieve_kwargs,
+        fn_suffix="hour12_1959_2021"
     )

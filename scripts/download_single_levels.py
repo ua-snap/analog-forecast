@@ -7,7 +7,8 @@ from pathlib import Path
 import cdsapi
 # local
 from download_era5 import download
-    
+from config import clim_cretrieve_kwargs
+
     
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
@@ -18,4 +19,10 @@ if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
     
     varnames = ["2m_temperature", "mean_sea_level_pressure", "sea_surface_temperature"]
-    download(download_dir, "reanalysis-era5-single-levels", varnames)
+    download(
+        download_dirdownload_dir,
+        dataset="reanalysis-era5-single-levels", 
+        varnames=varnames, 
+        cretrieve_kwargs=clim_cretrieve_kwargs,
+        fn_suffix="hour12_1959_2021"
+    )

@@ -4,31 +4,25 @@ import logging
 import cdsapi
 
 
-def download(download_dir, dataset, varnames, pressure_level=None):
-    """Download ERA5 data at 12:00 for each day from 1959 to 2021"""
+def download(download_dir, dataset, varnames, cretrieve_kwargs, fn_suffix):
+    """Download ERA5 data"""
     # trying to see if this can be done all in one request (might be too many "elements")
     logging.info(f"Downloading hourly ERA5 data to {download_dir}")
     c = cdsapi.Client()
     
-    download_dict = {   
-        "product_type": "reanalysis",
-        "format": "netcdf",
-        "variable": varnames,
-        # only going through 2022 right now to avoid getting "expver=5" (initial release data)
-        "year": [str(year) for year in range(1959, 2022)],
-        "month": [str(month).zfill(2) for month in range(1, 13)],
-        "day": [str(day).zfill(2) for day in range(1, 32)],
-        "time": "12:00",
-        "area": [90, -180, 0, 180],
-    }
-    if pressure_level:
-        download_dict["pressure_level"] = pressure_level
-
+    if isinstance(varnames, str):
+        varnames = [varnames]
+    
+    out_paths = []
     for varname in varnames:
+        out_fp = download_dir.joinpath(f"era5_{varname}_{fn_suffix}.nc")
+        cretrieve_kwargs.update({"variable": varname})
         c.retrieve(
             dataset,
-            download_dict,
-            download_dir.joinpath(f"era5_{varname}_hour12_1959_2021.nc"),
+            cretrieve_kwargs,
+            out_fp,
         )
-
-    return
+        out_paths.append(out_fp)
+    
+    return out_paths
+    
