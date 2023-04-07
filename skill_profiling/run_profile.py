@@ -109,44 +109,76 @@ def profile_analog_forecast(da, ref_dates, raw_da=None):
     return err_df
 
 
-def get_naive_sample_dates(all_times, naive_ref_date):
-    """Constructs list of all dates to be queried in some fashion for an instance of the naive forecast"""
-    analog_times = list(np.random.choice(all_times, 5, replace=False))
-    naive_ref_date = pd.to_datetime(naive_ref_date + " 12:00:00").to_numpy()
-    # if any sample times are closer than 15 days, re-sample
-    while np.any((np.diff(sorted(analog_times + [naive_ref_date])) / (10**9 * 60 * 60 * 24)).astype(int) <= 14):
-        analog_times = list(np.random.choice(all_times, 5, replace=False))
+def get_naive_sample_dates(all_times, ref_date):
+    """Constructs list of all dates to be used for a single forecast and error. I.e., all dates """
+    # limit pool of all potential times for analogs to be within 3-month window centered on
+    #  day-of-year of reference date
+    # iterate over all available years and use the same month-day as ref_dt to 
+    #  construct acceptance window of +/- 45 days, and accumulate boolean series
+    #  corresponding to all_times which essentially will be reduced via "or"
+    #  operation over the year axis.
+    ref_dt = pd.to_datetime(ref_date + " 12:00:00")
+    td_offset = pd.to_timedelta(45, "D")
+    all_times = pd.Series(all_times)
+    keep_bool = []
+    
+    for year in np.unique(pd.Series(all_times).dt.year):
+        tmp_ref_dt = pd.to_datetime(f"{year}-{ref_dt.month}-{ref_dt.day}")
+        keep_bool.append(
+            all_times.between(
+                tmp_ref_dt - (td_offset + pd.to_timedelta(1, "D")), 
+                tmp_ref_dt + td_offset
+            )
+        )
+    keep_times = all_times[np.array(keep_bool).sum(axis=0).astype(bool)]
+    
+    # construct an exclusion window around ref_date, based on size of forecast which is 14 days
+    forecast_length = 14
+    exclude = keep_times.between(
+        ref_dt - pd.to_timedelta(forecast_length + 2, "D"),
+        ref_dt + pd.to_timedelta(forecast_length + 1, "D")
+    )
+    keep_times[~exclude]
+    
+    # choose 5 times at random
+    analog_times = list(np.random.choice(keep_times, 5, replace=False))
     
     all_dates = []
-    for t in analog_times + [naive_ref_date]:
-        all_dates.extend(pd.date_range(t, t + pd.to_timedelta(14, unit="d")))
+    for t in analog_times + [ref_dt]:
+        all_dates.extend(pd.date_range(t, t + pd.to_timedelta(forecast_length, "D")))
     
     return all_dates, analog_times
 
 
-def profile_naive_forecast(da, n=1000):
+def profile_naive_forecast(da, ref_dates, n=1000):
     """Profiles the naive forecast method using a single data array with time, latitude, and longitude dimensions.
     Return a dataframe of results.
     """
-    results = []
-    for i in range(n):
-        # significant speed-up in pooling achieved by first sub-selecting the times of interest from in-memory datarray
-        #  times of interest will be the naive analog dates, the reference date, and the 14 days after all of them.
-        # (not sure if the above really applies with non-Pool-based method now, but it shouldn't hurt)
-        all_naive_dates, naive_analog_dates = get_naive_sample_dates(sub_da.time.values[:-15], naive_ref_date)
-        results.append(forecast_and_error(sub_da.sel(time=all_naive_dates), naive_analog_dates, naive_ref_date))
-    
-    sim_rmse = xr.concat(results, pd.Index(range(n), name="sim"))
+    err_df_rows = []
+    for ref_date in ref_dates:
+        results = []
+        for i in range(n):
+            # significant speed-up in pooling achieved by first sub-selecting the times of interest from in-memory datarray
+            #  times of interest will be the naive analog dates, the reference date, and the 14 days after all of them.
+            # (not sure if the above really applies with non-Pool-based method now, but it shouldn't hurt)
+            all_naive_dates, naive_analog_dates = get_naive_sample_dates(da.time.values, ref_date)
+            results.append(forecast_and_error(da.sel(time=all_naive_dates), naive_analog_dates, ref_date))
 
-    err_df = pd.DataFrame({
-        "variable": da.name,
-        "spatial_domain": spatial_domain,
-        "anomaly_search": use_anom,
-        "forecast_day_number": np.arange(14) + 1,
-        "naive_2.5": sim_rmse.reduce(np.percentile, dim="sim", q=2.5),
-        "naive_50": sim_rmse.reduce(np.percentile, dim="sim", q=50),
-        "naive_97.5": sim_rmse.reduce(np.percentile, dim="sim", q=97.5),
-    })
+        sim_rmse = xr.concat(results, pd.Index(range(n), name="sim"))
+
+        ref_err_df = pd.DataFrame({
+            "variable": da.name,
+            "spatial_domain": spatial_domain,
+            "reference_date": ref_date,
+            "forecast_day_number": np.arange(14) + 1,
+            "naive_2.5": sim_rmse.reduce(np.percentile, dim="sim", q=2.5),
+            "naive_50": sim_rmse.reduce(np.percentile, dim="sim", q=50),
+            "naive_97.5": sim_rmse.reduce(np.percentile, dim="sim", q=97.5),
+        })
+        
+        err_df_rows.append(ref_err_df)
+        
+    err_df = pd.concat(err_df_rows)
     
     return err_df
 
@@ -155,7 +187,7 @@ if __name__ == "__main__":
     varname, use_anom, results_fp, workers = parse_args()
     
     # set up the reference dates we will be using
-    ref_dates = ["2004-10-11", "2004-10-18", "2005-09-22", "2013-11-06", "2004-05-09", "2015-11-09", "2015-11-23"]
+    ref_dates = ["2004-10-11", "2004-10-18", "2005-09-22", "2013-11-06", "2004-05-09", "2015-11-09", "2015-11-23", "2011-11-09"]
     # ok and the reference dates we actually want are the dates which precede these dates by 3 and 5 days,
     #  so that the forecasts start 3 and 5 days ahead of these reference dates
     ref_dates = [
@@ -165,8 +197,6 @@ if __name__ == "__main__":
         (pd.to_datetime(date) - pd.to_timedelta(5, unit="d")).strftime("%Y-%m-%d")
         for date in ref_dates
     ]
-    # arbitrary reference date for naive forecasts
-    naive_ref_date = ref_dates[0]
     
     # load the data - strategy is to just load all the data, then iterate over domains
     fp_lu_key = {True: "anom_filename", False: "filename"}[use_anom]
@@ -181,7 +211,11 @@ if __name__ == "__main__":
         raw_ds = None
      
     analog_results = []
-    naive_results = []
+    
+    #  we only need to profile the naive forecast for standard (non-anomaly-based) search
+    #   because results should be identical
+    if not use_anom:
+        naive_results = []
     
     for spatial_domain in luts.spatial_domains:
         print(f"Working on {spatial_domain}", flush=True)
@@ -195,12 +229,14 @@ if __name__ == "__main__":
             tmp_result = profile_analog_forecast(sub_da, ref_dates)
         # profile the analog forecast by computing for all dates
         analog_results.append(tmp_result)
-        # profile the naive forecast
-        naive_results.append(profile_naive_forecast(sub_da))
         
-    naive_df = pd.concat(naive_results)
+        if not use_anom:
+            naive_results.append(profile_naive_forecast(sub_da, ref_dates))
+        
     analog_df = pd.concat(analog_results)
-    
     analog_df.round(3).to_csv(results_fp, index=False)
-    naive_fp = results_fp.parent.joinpath(results_fp.name.replace(".csv", "_naive.csv"))
-    naive_df.round(3).to_csv(naive_fp, index=False)
+    
+    if not use_anom:
+        naive_df = pd.concat(naive_results)
+        naive_fp = results_fp.parent.joinpath(results_fp.name.replace(".csv", "_naive.csv"))
+        naive_df.round(3).to_csv(naive_fp, index=False)
