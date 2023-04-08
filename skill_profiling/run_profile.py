@@ -111,6 +111,11 @@ def profile_analog_forecast(da, ref_dates, raw_da=None):
 
 def get_naive_sample_dates(all_times, ref_date):
     """Constructs list of all dates to be used for a single forecast and error. I.e., all dates """
+    # first, limit all_times to not include any of the last n values within the forecast
+    #  length (in days) as those would have forecast times that extend beyond what is in all_times
+    forecast_length = 14
+    all_times = all_times[:-(forecast_length + 1)]
+    
     # limit pool of all potential times for analogs to be within 3-month window centered on
     #  day-of-year of reference date
     # iterate over all available years and use the same month-day as ref_dt to 
@@ -133,7 +138,7 @@ def get_naive_sample_dates(all_times, ref_date):
     keep_times = all_times[np.array(keep_bool).sum(axis=0).astype(bool)]
     
     # construct an exclusion window around ref_date, based on size of forecast which is 14 days
-    forecast_length = 14
+    
     exclude = keep_times.between(
         ref_dt - pd.to_timedelta(forecast_length + 2, "D"),
         ref_dt + pd.to_timedelta(forecast_length + 1, "D")
@@ -150,7 +155,7 @@ def get_naive_sample_dates(all_times, ref_date):
     return all_dates, analog_times
 
 
-def profile_naive_forecast(da, ref_dates, n=1000):
+def profile_naive_forecast(da, ref_dates, spatial_domain, n=1000):
     """Profiles the naive forecast method using a single data array with time, latitude, and longitude dimensions.
     Return a dataframe of results.
     """
@@ -162,8 +167,10 @@ def profile_naive_forecast(da, ref_dates, n=1000):
             #  times of interest will be the naive analog dates, the reference date, and the 14 days after all of them.
             # (not sure if the above really applies with non-Pool-based method now, but it shouldn't hurt)
             all_naive_dates, naive_analog_dates = get_naive_sample_dates(da.time.values, ref_date)
+            # duplicated entries in da cause trouble - drop them
+            all_naive_dates = list(pd.Series(sorted(all_naive_dates)).drop_duplicates())
             results.append(forecast_and_error(da.sel(time=all_naive_dates), naive_analog_dates, ref_date))
-
+                
         sim_rmse = xr.concat(results, pd.Index(range(n), name="sim"))
 
         ref_err_df = pd.DataFrame({
@@ -231,7 +238,7 @@ if __name__ == "__main__":
         analog_results.append(tmp_result)
         
         if not use_anom:
-            naive_results.append(profile_naive_forecast(sub_da, ref_dates))
+            naive_results.append(profile_naive_forecast(sub_da, ref_dates, spatial_domain))
         
     analog_df = pd.concat(analog_results)
     analog_df.round(3).to_csv(results_fp, index=False)
