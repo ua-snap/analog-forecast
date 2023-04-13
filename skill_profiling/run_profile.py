@@ -77,7 +77,14 @@ def run_analog_forecast(da, ref_date, raw_da=None):
         "forecast_error": analog_error.values,
     })
     
-    return err_df
+    # table entry for analog dates identified
+    analogs_df = pd.DataFrame({
+        "reference_date": ref_date,
+        "analog_date": pd.to_datetime(analogs.time.values).strftime("%Y-%m-%d"),
+        "analog_score": analogs.values
+    })
+    
+    return err_df, analogs_df
 
 
 def profile_analog_forecast(da, ref_dates, raw_da=None):
@@ -90,12 +97,20 @@ def profile_analog_forecast(da, ref_dates, raw_da=None):
         results = [run_analog_forecast(da, date, raw_da) for date in ref_dates]
     else:
         results = [run_analog_forecast(da, date) for date in ref_dates]
-    err_df = pd.concat(results)
+
+    # forecast error dataframes are first in tuple
+    err_df = pd.concat([r[0] for r in results])
+    # dataframe of analog dates is second part
+    analogs_df = pd.concat([r[1] for r in results])
     
     # these attributes are constant for all reference dates
     err_df["variable"] = varname
     err_df["spatial_domain"] = spatial_domain
     err_df["anomaly_search"] = use_anom
+    analogs_df["variable"] = varname
+    analogs_df["spatial_domain"] = spatial_domain
+    analogs_df["anomaly_search"] = use_anom
+    
     # reorder columns
     err_df = err_df[[
         "variable", 
@@ -105,8 +120,16 @@ def profile_analog_forecast(da, ref_dates, raw_da=None):
         "forecast_day_number", 
         "forecast_error"
     ]]
+    analogs_df = analogs_df[[
+        "variable", 
+        "spatial_domain", 
+        "anomaly_search", 
+        "reference_date", 
+        "analog_date",
+        "analog_score",
+    ]]
     
-    return err_df
+    return err_df, analogs_df
 
 
 def get_naive_sample_dates(all_times, ref_date):
@@ -218,6 +241,7 @@ if __name__ == "__main__":
         raw_ds = None
      
     analog_results = []
+    dates_results = []
     
     #  we only need to profile the naive forecast for standard (non-anomaly-based) search
     #   because results should be identical
@@ -230,18 +254,23 @@ if __name__ == "__main__":
         sub_da = spatial_subset(ds[varname], bbox)
         if raw_ds is not None:
             raw_da = spatial_subset(raw_ds[varname], bbox)
-            tmp_result = profile_analog_forecast(sub_da, ref_dates, raw_da)
+            tmp_result, tmp_dates = profile_analog_forecast(sub_da, ref_dates, raw_da)
         else:
             raw_da = None
-            tmp_result = profile_analog_forecast(sub_da, ref_dates)
+            tmp_result, tmp_dates = profile_analog_forecast(sub_da, ref_dates)
         # profile the analog forecast by computing for all dates
         analog_results.append(tmp_result)
+        dates_results.append(tmp_dates)
         
         if not use_anom:
             naive_results.append(profile_naive_forecast(sub_da, ref_dates, spatial_domain))
         
     analog_df = pd.concat(analog_results)
     analog_df.round(3).to_csv(results_fp, index=False)
+    
+    dates_df = pd.concat(dates_results)
+    dates_fp = str(results_fp).replace(".csv", "_dates.csv")
+    dates_df.round(3).to_csv(dates_fp, index=False)
     
     if not use_anom:
         naive_df = pd.concat(naive_results)
