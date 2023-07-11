@@ -2,6 +2,7 @@
 """
 
 import argparse
+from datetime import datetime
 import xarray as xr
 from dask.distributed import Client
 import pandas as pd
@@ -35,11 +36,18 @@ def parse_args():
         default="alaska",
     )
     parser.add_argument(
+        "-a",
+        dest="use_anom",
+        type=bool,
+        help=f"Use anomalies for search",
+        default=False,
+    )
+    parser.add_argument(
         "-w", dest="workers", type=int, help="Number of workers to use for dask", default=8
     )
     args = parser.parse_args()
     
-    return args.varname, args.ref_date, args.spatial_domain, args.workers
+    return args.varname, args.ref_date, args.spatial_domain, args.use_anom, args.workers
 
 
 def spatial_subset(da, bbox):
@@ -97,19 +105,42 @@ def read_subset_era5(spatial_domain, data_dir, varname, use_anom):
     return sub_da
 
 
-def get_search_da(da, ref_date, window):
-    """Temporally subset a DataArray to only the desired timestamps for searching for analogs, based on method
+def prune_search_da(search_da, ref_date, window_size):
+    """Prune the search DataArray to consist only of dates that are a day-of-year within a n-day window centered on the day-of-year of the reference date
+    
+    Args:
+        search_da (xarray.DataArray): ERA5 dataArray, with time, latitude, longitude axes
+        ref_date (str): reference date to compare all other preceding time slices against
+        window_size (int): size of inclusion window.
+        
+    Returns:
+        pruned_da (xarray.DataArray): ERA5 DataArray consisting only of dates that are a day-of-year within a n-day window centered on the day-of-year of the reference date
+    """
+    half_window = round(window_size / 2)
+    ref_dtime = pd.to_datetime(ref_date + " 12:00:00")
+    ref_window = pd.date_range(
+        ref_dtime - pd.to_timedelta(half_window, "d"),
+        ref_dtime + pd.to_timedelta(half_window - 1, "d")
+    )
+    ref_doys = xr.DataArray(ref_window).dt.dayofyear.values
+    pruned_da = search_da.where(search_da.time.dt.dayofyear.isin(ref_doys), drop=True)
+    
+    return pruned_da
+
+
+def get_search_da(da, ref_date, window, window_size=90):
+    """Temporally subset a DataArray to only the desired timestamps for searching for analogs
     
     Args:
         da (xarray.DataArray): ERA5 dataArray, with time, latitude, longitude axes
         ref_date (str): reference date to compare all other preceding time slices against
-        temporal_search_method (str): method for temporal search, passed to get_search_da
+        window (str): option for omitting dates from the search window. 'precede' for the search window to stop 14 days short of the reference date; 'any' for only omitting the 14 days before/after the reference date, and the last 14 days of available data.
         
     Returns:
         search_da ((xarray.DataArray): data array to be searched for analogs
     """
     if window == "precede":
-        # don't want to accept analogs that are withing 15 days of the reference date
+        # don't want to accept analogs that are within 15 days of the reference date
         end_search_date = pd.to_datetime(ref_date) - pd.to_timedelta(15, unit="d")
         search_da = da.sel(time=slice(da.time.values[0], end_search_date))
     elif window == "any": 
@@ -124,6 +155,9 @@ def get_search_da(da, ref_date, window):
             ref_dtime + pd.to_timedelta(14, "d")
         )
         search_da = search_da.where(~search_da.time.isin(ref_window), drop=True)
+
+    # prune search_da to only include days of year within seasonal (90 day) window
+    search_da = prune_search_da(search_da, ref_date, window_size=90)
         
     return search_da
 
@@ -157,32 +191,43 @@ def rmse(da, ref_da):
     return rmse_da
 
 
-def run_rmse_over_time(da, ref_date, window):
+def run_rmse_over_time(da, window, ref_da=None, ref_date=None):
     """Get the RMSE between da at ref_time and every other preceding time slice. Calls compute() to process with dask.
     
     Args:
         da (xarray.DataArray): ERA5 dataArray, with time, latitude, longitude axes
-        ref_date (str): reference date to compare all other preceding time slices against
         window (str): method for temporal search, passed to get_search_da
+        ref_da (xarray.DataArray): DataArray of ERA5 data at reference date. Provide if this is already available
+        ref_date (str): reference date in format YYYY-mm-dd, if ref_da not provided
         
     Returns:
         rmse_da (xarra.DataArray): data array with an RMSE computed for each date preceding ref_date
     """
-    ref_da = da.sel(time=ref_date).squeeze()
+    if ref_da is None:
+        if ref_date is None:
+            exit("Must provide either reference date if available in da, or ref_da")
+        else:
+            ref_da = da.sel(time=ref_date).squeeze()
+    else:
+        if ref_date is not None:
+            exit("Both ref_da and ref_date were provided. Ignoring ref_date in favor of ref_da")
+        ref_date = pd.to_datetime(ref_da.time.values[0]).strftime('%Y-%m-%d')
+        # think we need to make sure ref_da has no time dimension?
+        ref_da = ref_da.squeeze()
+    
     search_da = get_search_da(da, ref_date, window)
     rmse_da = rmse(search_da, ref_da)
     
     return rmse_da
 
 
-def take_analogs(error_da, buffer, ref_date, n=5):
+def take_analogs(error_da, buffer, n_analogs=5):
     """Take the top n times from error_da ('top' == smallest error) with constraints on how close in time these top times may be.
     
     Args:
         error_da (xarray.DataArray): error values indexed by time
         buffer (int): number of days to buffer each top time for excluding subsequent times
-        ref_date (str): 
-        n (int): number of analogs to keep
+        n_analogs (int): number of analogs to keep
         
     Returns:
         analogs (xarray.DataArray): top n analogs taken from error_da
@@ -197,7 +242,7 @@ def take_analogs(error_da, buffer, ref_date, n=5):
         if not any([t in dr for dr in analog_buffer_ranges]):
             analog_buffer_ranges.append(pd.date_range(t - td_buffer, t + td_buffer))
             analog_times.append(t)
-        if len(analog_buffer_ranges) == 5:
+        if len(analog_buffer_ranges) == n_analogs:
             break
 
     analogs = error_da.sel(time=analog_times)
@@ -205,20 +250,21 @@ def take_analogs(error_da, buffer, ref_date, n=5):
     return analogs
 
 
-def find_analogs(da, ref_date, print_analogs=False):
+def find_analogs(da, print_analogs=False, ref_da=None, ref_date=None):
     """Find the analogs.
     
     Args:
         da (xarray.DataArray): data array of ERA5 data (likely already subset to area of interest)
-        ref_date (str): reference date in formate YYYY-mm-dd
         print_analogs (bool): print the top 5 analogs and scores
+        ref_da (xarray.DataArray): DataArray of ERA5 data at reference date. Provide if this is already available
+        ref_date (str): reference date in format YYYY-mm-dd, if ref_da not provided
         
     Returns:
         analogs (xarray.DataArray): data array of RMSE values and dates for 5 best analogs
     """
     # compute RMSE between ref_date and all preceding dates 
     #  for the specified variable and spatial domain
-    rmse_da = run_rmse_over_time(da, ref_date, "any")
+    rmse_da = run_rmse_over_time(da, window="any", ref_da=ref_da, ref_date=ref_date)
     varname = da.name
     
     # subset to first 5 analogs for now
@@ -228,7 +274,7 @@ def find_analogs(da, ref_date, print_analogs=False):
         buffer = 30
     elif varname in ["sst"]:
         buffer = 180
-    analogs = take_analogs(rmse_da, buffer, ref_date, 5)
+    analogs = take_analogs(rmse_da, buffer, n_analogs=5)
     
     if print_analogs:
         print("   Top 5 Analogs: ")
@@ -285,13 +331,13 @@ def make_forecast(sub_da, times, ref_date):
 
 if __name__ == "__main__":
     # parse some args
-    varname, ref_date, spatial_domain, workers = parse_args()
+    varname, ref_date, spatial_domain, use_anom, workers = parse_args()
     
     # start dask cluster
     client = Client(n_workers=workers, dashboard_address="localhost:33338")
     # run analog search
     # get the ERA5 data for searching
     sub_da = read_subset_era5(spatial_domain, data_dir, varname, use_anom)
-    analogs = find_analogs(da, ref_date, print_analogs=True)
+    analogs = find_analogs(sub_da, ref_date, print_analogs=True)
     # close cluster
     client.close()
