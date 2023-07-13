@@ -18,7 +18,13 @@ python analog_forecast.py -v sst -d 2021-12-01 -s alaska
 
 ## Contents
 
-## `scripts`
+`analog_forecast.py`: this is the main module for generating the analog forecast. It can be called from the command line or imported and run in a separate python environment, such as a notebook.
+`config.py`: config file with some useful constants
+`luts.py`: like config but for lookup tables (dicts)
+`qc.ipynb`: notebook for quality checking different parts of the algorithm
+`run_forecast.ipynb`: notebook for running the analog forecast program. Includes code for downloading ERA5 data if you want to generate a forecast for a date not included in the historical data archive, and interactive visualization of forecast error if forecast dates are found in the historical archive.
+
+## `scripts/`
 
 Scripts and modules for preparing the data. Use these scripts to download the necessary data. To actually run any of these scripts, set the `PROJECT_DIR` environment variable to the path of this repo on the local filesystem and add it to the `PYTHONPATH` variable. E.g. run the following from the directory containing this file:
 
