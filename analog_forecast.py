@@ -10,6 +10,7 @@ import numpy as np
 #local
 import luts
 from config import data_dir
+from scripts.download_era5 import run_download
 
 
 def parse_args():
@@ -327,6 +328,82 @@ def make_forecast(sub_da, times, ref_date):
     )
     
     return forecast
+
+
+def run_forecast(
+    varname,
+    search_domain,
+    forecast_domain,
+    ref_date,
+    use_anom,
+    print_analogs=True,
+    return_error=False
+):
+    """Highest level function to run the analog forecast for a supplied reference date. Will download ERA5 data if reference date is not found in historical archive.
+    
+    Args:
+        varname (str): name of variable for forecast (and search)
+        search_domain (str): name of spatial domain to use for search
+        forecast_domain (str): name of spatial domain to use for forecast
+        ref_date (str): reference date for which to construct forecast of following 14 days from, in format YYYY-mm-dd
+        use_anom (bool): use anomalies for search
+        print_analogs (bool): print out the analogs
+        return_error (bool): include the forecast error array (raw array minus forecast) in tuple with forecast array
+        
+    Returns:
+        forecast (xarray.DataArray): forecast data array consisting of forecasts for the 14 dates following the reference date and with spatial extent matching the forecast domain
+    """
+    ref_date = pd.to_datetime(ref_date + "T12:00:00")
+    # read in the historical archive of specified the variable for searching
+    search_da = read_subset_era5(search_domain, data_dir, varname, use_anom=use_anom)
+    
+    if use_anom:
+        # if using anomalies, will need the raw data as well for forecasting
+        raw_da = read_subset_era5(search_domain, data_dir, varname, use_anom=False)
+
+    # download data for reference date if it is not part of the current historical archive
+    if ref_date not in search_da.time[:-15]:
+        print("Reference date not found in historical archive, downloading...")
+        bbox = list(luts.spatial_domains[search_domain]["bbox"])
+        era5_dataset_name = luts.varnames_lu[varname]["era5_dataset_name"]
+        era5_long_name = luts.varnames_lu[varname]["era5_long_name"]
+        out_paths = run_download(bbox, ref_date, data_dir, era5_dataset_name, era5_long_name)
+        ref_da = xr.load_dataset(out_paths[0])[varname]
+
+        if use_anom:
+            # if using anomalies and have downloaded data, will need to compute anomalies for the reference date
+            # compute the climatology from the raw data for the day of year of the reference date
+            clim_da = raw_da.sel(
+                time=raw_da.time[raw_da.dayofyear == ref_date.dayofyear]
+            ).mean(dim="time")
+            ref_anom_da = ref_da - clim_da
+            # append this to the search_da
+            #sub_da = xr.concat([sub_da.drop("dayofyear"), ref_anom_da], dim="time")
+    else:
+        ref_da = search_da.sel(time=[ref_date])
+    
+    if not use_anom:
+        # if not using anomalies, search data is already the raw data
+        raw_da = search_da
+
+    # find the analogs
+    analogs = find_analogs(search_da, print_analogs=print_analogs, ref_da=ref_da)
+    
+    if forecast_domain != search_domain:
+        # if forecast domain and search domain are different, read in a new subset of ERA5 for the forecast domain
+        raw_da = read_subset_era5(forecast_domain, data_dir, varname, use_anom=False)
+    else:
+        # otherwise, use the raw data for constructing the forecast
+        raw_da = raw_da
+    
+    forecast = make_forecast(raw_da, analogs.time.values, ref_date.strftime('%Y-%m-%d'))
+    
+    if return_error:
+        err = raw_da.sel(time=forecast.time.values) - forecast
+        err.name = "error"
+        return forecast, err
+    else:
+        return forecast
 
 
 if __name__ == "__main__":
