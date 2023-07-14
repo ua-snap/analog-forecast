@@ -251,11 +251,11 @@ def take_analogs(error_da, buffer, n_analogs=5):
     return analogs
 
 
-def find_analogs(da, print_analogs=False, ref_da=None, ref_date=None):
+def find_analogs(search_da, print_analogs=False, ref_da=None, ref_date=None):
     """Find the analogs.
     
     Args:
-        da (xarray.DataArray): data array of ERA5 data (likely already subset to area of interest)
+        search_da (xarray.DataArray): data array of ERA5 data (likely already subset to area of interest)
         print_analogs (bool): print the top 5 analogs and scores
         ref_da (xarray.DataArray): DataArray of ERA5 data at reference date. Provide if this is already available
         ref_date (str): reference date in format YYYY-mm-dd, if ref_da not provided
@@ -265,8 +265,8 @@ def find_analogs(da, print_analogs=False, ref_da=None, ref_date=None):
     """
     # compute RMSE between ref_date and all preceding dates 
     #  for the specified variable and spatial domain
-    rmse_da = run_rmse_over_time(da, window="any", ref_da=ref_da, ref_date=ref_date)
-    varname = da.name
+    rmse_da = run_rmse_over_time(search_da, window="any", ref_da=ref_da, ref_date=ref_date)
+    varname = search_da.name
     
     # subset to first 5 analogs for now
     # impose restrictions on temporal proximity for analog based on variable.

@@ -45,12 +45,12 @@ def parse_args():
 
 
 def forecast_and_error(da, times, ref_date):
-    """Construct a forecast using times and a reference date, and return the error values
+    """Construct a forecast using timestamps and a reference date, and return the error values
     
     Args:
         da (xarray.DataArray): ref_date
         times (list/array-like): flat array or list of datetimes (which must be present in da) to use for constructing the forecast
-        ref_date (str): date 
+        ref_date (str): date in format YYYY-mm-dd
         
     Returns:
         the forecast error, only RMSE supported for now
@@ -61,14 +61,19 @@ def forecast_and_error(da, times, ref_date):
     return np.sqrt((err ** 2).mean(axis=(1, 2)).drop("time"))
 
 
-def run_analog_forecast(da, ref_date, raw_da=None):
-    analogs = find_analogs(da, ref_date)
-    if raw_da is not None:
-        # raw_da will be supplied if da is anomaly data
-        #  it will be needed for generating forecasts
-        analog_error = forecast_and_error(raw_da, analogs.time.values, ref_date)
-    else:
-        analog_error = forecast_and_error(da, analogs.time.values, ref_date)
+def run_analog_forecast(search_da, ref_date, raw_da):
+    """Run the analog forecast for a given reference date. Differs from the "run_forecast" function in the top-level analog_forecast.py module in that ref date must be within the provided data array, and the output is structured for results tables
+    
+    Args:
+        search_da (xarray.DataArray): data array of ERA5 data covering the spatial domain used for searching for analogs
+        ref_date (str): reference date in format YYYY-mm-dd
+        raw_da (xarray.DataArray): data array of ERA5 data for generating the forecast from. This should be subset to the forecast domain of interest.
+        
+    Returns:
+        tuple of (err_df, analogs_df): err_df is pandas.DataFrame of error results, analogs_df contains analog scores for top analogs
+    """
+    analogs = find_analogs(search_da, ref_date=ref_date)
+    analog_error = forecast_and_error(raw_da, analogs.time.values, ref_date)
     
     # start a table entry
     err_df = pd.DataFrame({
@@ -87,16 +92,18 @@ def run_analog_forecast(da, ref_date, raw_da=None):
     return err_df, analogs_df
 
 
-def profile_analog_forecast(da, ref_dates, raw_da=None):
-    """Profile the analog forecast for a given data array at the different ref_dates.
-    Return a dataframe of results.
+def profile_analog_forecast(search_da, ref_dates, raw_da):
+    """Profile the analog forecast for a given set of reference dates using the supplied data array, which is already subsetted to a particular spatial domain.
+    
+    Args:
+        search_da (xarray.DataArray): data array of ERA5 data covering the spatial domain used for searching for analogs
+        ref_date (str): reference date in format YYYY-mm-dd
+        raw_da (xarray.DataArray): data array of ERA5 data for generating the forecast. This should be subset to the forecast domain of interest.
+        
+    Returns:
+        two dataframes of results
     """
-    if raw_da is not None:
-        # raw_da will be supplied if da is anomaly data
-        #  it will be needed for generating forecasts
-        results = [run_analog_forecast(da, date, raw_da) for date in ref_dates]
-    else:
-        results = [run_analog_forecast(da, date) for date in ref_dates]
+    results = [run_analog_forecast(search_da, date, raw_da) for date in ref_dates]
 
     # forecast error dataframes are first in tuple
     err_df = pd.concat([r[0] for r in results])
@@ -105,16 +112,19 @@ def profile_analog_forecast(da, ref_dates, raw_da=None):
     
     # these attributes are constant for all reference dates
     err_df["variable"] = varname
-    err_df["spatial_domain"] = spatial_domain
+    err_df["search_domain"] = search_da.attrs["spatial_domain"]
+    err_df["forecast_domain"] = raw_da.attrs["spatial_domain"]
     err_df["anomaly_search"] = use_anom
     analogs_df["variable"] = varname
-    analogs_df["spatial_domain"] = spatial_domain
+    analogs_df["search_domain"] = search_da.attrs["spatial_domain"]
+    analogs_df["forecast_domain"] = raw_da.attrs["spatial_domain"]
     analogs_df["anomaly_search"] = use_anom
     
     # reorder columns
     err_df = err_df[[
         "variable", 
-        "spatial_domain", 
+        "search_domain", 
+        "forecast_domain",
         "anomaly_search", 
         "reference_date", 
         "forecast_day_number", 
@@ -122,7 +132,8 @@ def profile_analog_forecast(da, ref_dates, raw_da=None):
     ]]
     analogs_df = analogs_df[[
         "variable", 
-        "spatial_domain", 
+        "search_domain",
+        "forecast_domain",
         "anomaly_search", 
         "reference_date", 
         "analog_date",
@@ -133,7 +144,15 @@ def profile_analog_forecast(da, ref_dates, raw_da=None):
 
 
 def get_naive_sample_dates(all_times, ref_date):
-    """Constructs list of all dates to be used for a single forecast and error. I.e., all dates """
+    """Constructs list of all dates to be used for a single naive forecast and error. 
+    
+    Args:
+        all_times (list): list of all times available in the hsitorical archive
+        ref_date (str): reference date in format YYYY-mm-dd
+        
+    Returns:
+        tuple of (all_dates, analog_times): all_dates is a list of the analog dates and the subsequent dates of each to be used in the forecast, analog_times is a list of only the analog dates
+    """
     # first, limit all_times to not include any of the last n values within the forecast
     #  length (in days) as those would have forecast times that extend beyond what is in all_times
     forecast_length = 14
@@ -161,7 +180,6 @@ def get_naive_sample_dates(all_times, ref_date):
     keep_times = all_times[np.array(keep_bool).sum(axis=0).astype(bool)]
     
     # construct an exclusion window around ref_date, based on size of forecast which is 14 days
-    
     exclude = keep_times.between(
         ref_dt - pd.to_timedelta(forecast_length + 2, "D"),
         ref_dt + pd.to_timedelta(forecast_length + 1, "D")
@@ -178,9 +196,11 @@ def get_naive_sample_dates(all_times, ref_date):
     return all_dates, analog_times
 
 
-def profile_naive_forecast(da, ref_dates, spatial_domain, n=1000):
+def profile_naive_forecast(raw_da, ref_dates, n=1000):
     """Profiles the naive forecast method using a single data array with time, latitude, and longitude dimensions.
     Return a dataframe of results.
+    
+    Don't need to worry about search v forecast domains because search for analogs is randomized
     """
     err_df_rows = []
     for ref_date in ref_dates:
@@ -189,16 +209,18 @@ def profile_naive_forecast(da, ref_dates, spatial_domain, n=1000):
             # significant speed-up in pooling achieved by first sub-selecting the times of interest from in-memory datarray
             #  times of interest will be the naive analog dates, the reference date, and the 14 days after all of them.
             # (not sure if the above really applies with non-Pool-based method now, but it shouldn't hurt)
-            all_naive_dates, naive_analog_dates = get_naive_sample_dates(da.time.values, ref_date)
+            all_naive_dates, naive_analog_dates = get_naive_sample_dates(raw_da.time.values, ref_date)
             # duplicated entries in da cause trouble - drop them
             all_naive_dates = list(pd.Series(sorted(all_naive_dates)).drop_duplicates())
-            results.append(forecast_and_error(da.sel(time=all_naive_dates), naive_analog_dates, ref_date))
+            results.append(
+                forecast_and_error(raw_da.sel(time=all_naive_dates), naive_analog_dates, ref_date)
+            )
                 
         sim_rmse = xr.concat(results, pd.Index(range(n), name="sim"))
 
         ref_err_df = pd.DataFrame({
-            "variable": da.name,
-            "spatial_domain": spatial_domain,
+            "variable": raw_da.name,
+            "forecast_domain": raw_da.attrs["spatial_domain"]
             "reference_date": ref_date,
             "forecast_day_number": np.arange(14) + 1,
             "naive_2.5": sim_rmse.reduce(np.percentile, dim="sim", q=2.5),
@@ -248,22 +270,31 @@ if __name__ == "__main__":
     if not use_anom:
         naive_results = []
     
-    for spatial_domain in luts.spatial_domains:
-        print(f"Working on {spatial_domain}", flush=True)
-        bbox = luts.spatial_domains[spatial_domain]["bbox"]
-        sub_da = spatial_subset(ds[varname], bbox)
+    # okay our only forecast domain will be alaska for now
+    forecast_domain = "alaska"
+    for search_domain in luts.spatial_domains:
+        print(f"Working on search domain of {search_domain}, forecast domain of {forecast_domain}", flush=True)
+        search_bbox = luts.spatial_domains[search_domain]["bbox"]
+        forecast_bbox = luts.spatial_domains[forecast_domain]["bbox"]
+        search_da = spatial_subset(ds[varname], search_bbox)
         if raw_ds is not None:
-            raw_da = spatial_subset(raw_ds[varname], bbox)
-            tmp_result, tmp_dates = profile_analog_forecast(sub_da, ref_dates, raw_da)
+            raw_da = spatial_subset(raw_ds[varname], forecast_bbox)
         else:
-            raw_da = None
-            tmp_result, tmp_dates = profile_analog_forecast(sub_da, ref_dates)
+            raw_da = spatial_subset(ds[varname], forecast_bbox)
+            
+        # set the spatial domain attribute of each, used later in compiling results
+        search_da.attrs["spatial_domain"] = search_domain
+        raw_da.attrs["spatial_domain"] = forecast_domain
+            
+        tmp_result, tmp_dates = profile_analog_forecast(search_da, ref_dates, raw_da)
         # profile the analog forecast by computing for all dates
         analog_results.append(tmp_result)
         dates_results.append(tmp_dates)
         
+        # profile naive results as well, since we have the data loaded already
+        # only need to do this one time as naive results are expected to be the same whether using anomalies or not
         if not use_anom:
-            naive_results.append(profile_naive_forecast(sub_da, ref_dates, spatial_domain))
+            naive_results.append(profile_naive_forecast(raw_da, ref_dates))
         
     analog_df = pd.concat(analog_results)
     analog_df.round(3).to_csv(results_fp, index=False)
