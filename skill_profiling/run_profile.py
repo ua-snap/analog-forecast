@@ -220,7 +220,7 @@ def profile_naive_forecast(raw_da, ref_dates, n=1000):
 
         ref_err_df = pd.DataFrame({
             "variable": raw_da.name,
-            "forecast_domain": raw_da.attrs["spatial_domain"]
+            "forecast_domain": raw_da.attrs["spatial_domain"],
             "reference_date": ref_date,
             "forecast_day_number": np.arange(14) + 1,
             "naive_2.5": sim_rmse.reduce(np.percentile, dim="sim", q=2.5),
