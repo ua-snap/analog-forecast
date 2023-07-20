@@ -64,8 +64,8 @@ def spatial_subset(da, bbox):
     """
     varname = da.name
     if 0 <= bbox[0] < bbox[2] < 360:
-        da_w = da.sel(latitude=slice(bbox[3], bbox[1]), longitude=slice(-180, (bbox[2] - 360))).load()
-        da_e = da.sel(latitude=slice(bbox[3], bbox[1]), longitude=slice(bbox[0], 180)).load()
+        da_w = da.sel(latitude=slice(bbox[3], bbox[1]), longitude=slice(-180, (bbox[2] - 360)))
+        da_e = da.sel(latitude=slice(bbox[3], bbox[1]), longitude=slice(bbox[0], 180))
         da_w = da_w.assign_coords(longitude=da_w.longitude.values + 360)
         sub_da = xr.combine_by_coords([da_w, da_e])[varname]
     else:  

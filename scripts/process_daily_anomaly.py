@@ -16,7 +16,7 @@ def parse_args():
         dest="varname",
         type=str,
         help=(
-            "Variable name to look for analogs. "
+            "Variable name to generate daily anomaly dataset for"
             "Options are t2m (temperature), sst (sea surface temperature), msl (mean sea level pressure), z (geopotential 500 hPa)"
         ),
         required=True

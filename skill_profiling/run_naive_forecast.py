@@ -3,6 +3,7 @@
 
 import argparse
 from pathlib import Path
+import dask
 import numpy as np
 import pandas as pd
 import xarray as xr
@@ -28,12 +29,9 @@ def parse_args():
         help="path to write results to",
         required=True
     )
-    parser.add_argument(
-        "--ncpus", type=int, help="Number of CPUs to use for pooling", default=8
-    )
     args = parser.parse_args()
     
-    return args.varname, Path(args.results_fp), args.ncpus
+    return args.varname, Path(args.results_fp)
 
 
 def get_naive_sample_dates(all_times, ref_date, n=1000):
@@ -99,13 +97,18 @@ def get_naive_sample_dates(all_times, ref_date, n=1000):
     return naive_dates
 
 
-def profile_naive_forecast(raw_da, ref_dates, ncpus, n=1000):
+@dask.delayed
+def run_forecast_and_error(args):
+    """dask.delayed wrapper for forecast_and_error"""
+    return forecast_and_error(*args)
+
+
+def profile_naive_forecast(raw_da, ref_dates, n=1000):
     """Profile the naive forecast by simulating it n times.
     
     Args:
         raw_da (xarray.DataArray): 
         ref_dates (list): list of string representations of dates in form YYYY-mm-dd
-        ncpus (int): number of CPUs to use for multiprocessing.Pool
         n (int): number of simulations to run
         
     Returns:
@@ -122,11 +125,13 @@ def profile_naive_forecast(raw_da, ref_dates, ncpus, n=1000):
             )
             for rep in all_naive_dates
         ]
-        
-        with Pool(ncpus) as pool:
-            results = pool.starmap(forecast_and_error, args)
 
-        sim_rmse = xr.concat(results, pd.Index(range(n), name="sim"))
+        results = []
+        for arg in args:
+            results.append(run_forecast_and_error(arg))
+        
+        results = dask.compute(results)
+        sim_rmse = xr.concat(results[0], pd.Index(range(n), name="sim"))
 
         ref_err_df = pd.DataFrame({
             "variable": raw_da.name,
@@ -146,7 +151,7 @@ def profile_naive_forecast(raw_da, ref_dates, ncpus, n=1000):
 
 
 if __name__ == "__main__":
-    varname, results_fp, ncpus = parse_args()
+    varname, results_fp = parse_args()
     ref_dates = generate_reference_dates(forecast_dates)
     raw_fp = data_dir.joinpath(luts.varnames_lu[varname]["filename"])
     raw_ds = xr.open_dataset(raw_fp)
@@ -155,7 +160,7 @@ if __name__ == "__main__":
         forecast_bbox = luts.spatial_domains[forecast_domain]["bbox"]
         raw_da = spatial_subset(raw_ds[varname], forecast_bbox)
         raw_da.attrs["spatial_domain"] = forecast_domain
-        results = profile_naive_forecast(raw_da, ref_dates, ncpus)
+        results = profile_naive_forecast(raw_da, ref_dates)
         naive_results.append(results)
         print(forecast_domain, "done")
     

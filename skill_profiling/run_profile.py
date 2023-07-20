@@ -226,8 +226,3 @@ if __name__ == "__main__":
     dates_df = pd.concat(dates_results)
     dates_fp = str(results_fp).replace(".csv", "_dates.csv")
     dates_df.round(3).to_csv(dates_fp, index=False)
-    
-    if not use_anom:
-        naive_df = pd.concat(naive_results)
-        naive_fp = results_fp.parent.joinpath(results_fp.name.replace(".csv", "_naive.csv"))
-        naive_df.round(3).to_csv(naive_fp, index=False)
