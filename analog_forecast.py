@@ -213,7 +213,7 @@ def run_rmse_over_time(da, window, ref_da=None, ref_date=None):
         if ref_date is not None:
             exit("Both ref_da and ref_date were provided. Ignoring ref_date in favor of ref_da")
         ref_date = pd.to_datetime(ref_da.time.values[0]).strftime('%Y-%m-%d')
-        # think we need to make sure ref_da has no time dimension?
+        # need to make sure ref_da has no time dimension for rmse()
         ref_da = ref_da.squeeze()
     
     search_da = get_search_da(da, ref_date, window)
