@@ -27,7 +27,7 @@ def parse_args():
         required=True
     )
     parser.add_argument(
-        "-d", dest="ref_date", type=str, help="Date to use for analog search", required=True
+        "-d", dest="ref_date", type=str, help="Date to use for analog search (YYYY-MM-DD format)", required=True
     )
     parser.add_argument(
         "-s",
