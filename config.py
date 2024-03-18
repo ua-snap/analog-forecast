@@ -6,12 +6,12 @@ from pathlib import Path
 try:
     data_dir = Path(os.getenv("DATA_DIR"))
 except TypeError:
-    exit("DATA_DIR env variable not set correctly. Must be set to path of directory containing ERA5 data. Exiting.")
+    print("DATA_DIR env variable not set correctly. Must be set to path of directory containing ERA5 data.")
 
 try:
     project_dir = Path(os.getenv("PROJECT_DIR"))
 except TypeError:
-    exit("PROJECT_DIR env variable not set correctly. Must be set to path of the analog-forecast repository. Exiting.")
+    print("PROJECT_DIR env variable not set correctly. Must be set to path of the analog-forecast repository.")
 
 # these are the params for downloading the historical data
 #  (not the "recent" data for actual forecasts)
