@@ -16,6 +16,17 @@ To run the basic analog forecast program from the command line:
 python analog_forecast.py -v sst -d 2021-12-01 -s alaska
 ```
 
+### Spatial domains
+
+The following four spatial domains are available for both analog search and forecast (bbox bounds in W,S,E,N):
+
+```
+"alaska": (-180, 44, -125, 76)
+"northern_hs": (-180, 0, 180, 90)
+"panarctic": (-180, 55, 180, 90)
+"north_pacific": (120, 0, 240, 90)
+```
+
 ## Contents
 
 `analog_forecast.py`: this is the main module for generating the analog forecast. It can be called from the command line or imported and run in a separate python environment, such as a notebook.
