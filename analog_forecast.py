@@ -37,11 +37,9 @@ def parse_args():
         default="alaska",
     )
     parser.add_argument(
-        "-a",
-        dest="use_anom",
-        type=bool,
-        help=f"Use anomalies for search",
-        default=False,
+        "--use_anom",
+        action="store_true",
+        help=f"Use anomalies for search.",
     )
     parser.add_argument(
         "-w", dest="workers", type=int, help="Number of workers to use for dask", default=8
@@ -415,6 +413,6 @@ if __name__ == "__main__":
     # run analog search
     # get the ERA5 data for searching
     sub_da = read_subset_era5(spatial_domain, data_dir, varname, use_anom)
-    analogs = find_analogs(sub_da, ref_date, print_analogs=True)
+    analogs = find_analogs(sub_da, print_analogs=True, ref_date=ref_date)
     # close cluster
     client.close()
