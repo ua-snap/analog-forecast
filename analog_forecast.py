@@ -3,6 +3,7 @@
 
 import argparse
 from datetime import datetime
+from pathlib import Path
 import xarray as xr
 from dask.distributed import Client
 import pandas as pd
@@ -30,14 +31,22 @@ def parse_args():
         "-d", dest="ref_date", type=str, help="Date to use for analog search (YYYY-MM-DD format)", required=True
     )
     parser.add_argument(
-        "-s",
-        dest="spatial_domain",
+        "-sd",
+        dest="search_domain",
         type=str,
-        help=f"Spatial domain to use for analog search and forecast. Options are {', '.join(list(luts.spatial_domains.keys()))}",
+        help=f"Spatial domain to use for analog search. Options are {', '.join(list(luts.spatial_domains.keys()))}",
         default="alaska",
     )
     parser.add_argument(
-        "--use_anom",
+        "-fd",
+        dest="forecast_domain",
+        type=str,
+        help=f"Spatial domain to use for analog forecast. Options are {', '.join(list(luts.spatial_domains.keys()))}",
+        default="alaska",
+    )
+    parser.add_argument(
+        "--use-anom",
+        dest="use_anom",
         action="store_true",
         help=f"Use anomalies for search.",
     )
@@ -49,7 +58,7 @@ def parse_args():
     )
     args = parser.parse_args()
     
-    return args.varname, args.ref_date, args.spatial_domain, args.use_anom, args.n_analogs, args.workers
+    return args.varname, args.ref_date, args.search_domain, args.forecast_domain, args.use_anom, args.n_analogs, args.workers
 
 
 def spatial_subset(da, bbox):
@@ -410,13 +419,33 @@ def run_forecast(
 
 if __name__ == "__main__":
     # parse some args
-    varname, ref_date, spatial_domain, use_anom, n_analogs, workers = parse_args()
+    varname, ref_date, search_domain, forecast_domain, use_anom, n_analogs, workers = parse_args()
     
     # start dask cluster
-    client = Client(n_workers=workers, dashboard_address="localhost:33338")
+    client = Client(n_workers=workers)
     # run analog search
     # get the ERA5 data for searching
-    sub_da = read_subset_era5(spatial_domain, data_dir, varname, use_anom)
+    sub_da = read_subset_era5(search_domain, data_dir, varname, use_anom)
     analogs = find_analogs(sub_da, print_analogs=True, ref_date=ref_date, n_analogs=n_analogs)
+    forecast, err = run_forecast(varname, search_domain, forecast_domain, ref_date, use_anom, print_analogs=True, return_error=True)
+
+    forecast.name = varname
+    forecast_ds = forecast.to_dataset()
+    forecast_ds.attrs = {
+        "title": "Analog forecast",
+        "variable": varname,
+        "search_domain": search_domain, 
+        "forecast_domain": forecast_domain,
+        "reference_date": ref_date,
+        "anomaly_based_search": "true" if use_anom else "false",
+    }
+    err.attrs = {"name": "Analog forecast error", "error_type": "rmse"}
+    forecast_ds.assign(error=err)
+
+    out_anom_suffix = "_anom" if use_anom else ""
+    out_fp = Path("forecasts").joinpath(f"{varname}_{search_domain}_{forecast_domain}_{ref_date}{out_anom_suffix}.nc")
+    out_fp.parent.mkdir(exist_ok=True)
+    forecast_ds.to_netcdf(out_fp)
+
     # close cluster
     client.close()
