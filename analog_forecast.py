@@ -42,11 +42,14 @@ def parse_args():
         help=f"Use anomalies for search.",
     )
     parser.add_argument(
+        "-n", dest="n_analogs", type=int, help="Number of analogs to use", default=5
+    )
+    parser.add_argument(
         "-w", dest="workers", type=int, help="Number of workers to use for dask", default=8
     )
     args = parser.parse_args()
     
-    return args.varname, args.ref_date, args.spatial_domain, args.use_anom, args.workers
+    return args.varname, args.ref_date, args.spatial_domain, args.use_anom, args.n_analogs, args.workers
 
 
 def spatial_subset(da, bbox):
@@ -249,14 +252,15 @@ def take_analogs(error_da, buffer, n_analogs=5):
     return analogs
 
 
-def find_analogs(search_da, print_analogs=False, ref_da=None, ref_date=None):
+def find_analogs(search_da, print_analogs=False, ref_da=None, ref_date=None, n_analogs=5):
     """Find the analogs.
     
     Args:
         search_da (xarray.DataArray): data array of ERA5 data (likely already subset to area of interest)
-        print_analogs (bool): print the top 5 analogs and scores
+        print_analogs (bool): print the top analogs and scores
         ref_da (xarray.DataArray): DataArray of ERA5 data at reference date. Provide if this is already available
         ref_date (str): reference date in format YYYY-mm-dd, if ref_da not provided
+        n_analogs (int): number of analogs to search for.
         
     Returns:
         analogs (xarray.DataArray): data array of RMSE values and dates for 5 best analogs
@@ -273,12 +277,12 @@ def find_analogs(search_da, print_analogs=False, ref_da=None, ref_date=None):
         buffer = 30
     elif varname in ["sst"]:
         buffer = 180
-    analogs = take_analogs(rmse_da, buffer, n_analogs=5)
+    analogs = take_analogs(rmse_da, buffer, n_analogs=n_analogs)
     
     if print_analogs:
-        print("   Top 5 Analogs: ")
+        print(f"   Top {n_analogs} Analogs: ")
         for rank, date, rmse in zip(
-            [1, 2, 3, 4, 5], pd.to_datetime(analogs.time.values), analogs.values
+            np.arange(n_analogs) + 1, pd.to_datetime(analogs.time.values), analogs.values
         ):
             print(f"Rank {rank}:   Date: {date:%Y-%m-%d};  RMSE: {round(rmse, 3):.3f}")
     
@@ -406,13 +410,13 @@ def run_forecast(
 
 if __name__ == "__main__":
     # parse some args
-    varname, ref_date, spatial_domain, use_anom, workers = parse_args()
+    varname, ref_date, spatial_domain, use_anom, n_analogs, workers = parse_args()
     
     # start dask cluster
     client = Client(n_workers=workers, dashboard_address="localhost:33338")
     # run analog search
     # get the ERA5 data for searching
     sub_da = read_subset_era5(spatial_domain, data_dir, varname, use_anom)
-    analogs = find_analogs(sub_da, print_analogs=True, ref_date=ref_date)
+    analogs = find_analogs(sub_da, print_analogs=True, ref_date=ref_date, n_analogs=n_analogs)
     # close cluster
     client.close()
