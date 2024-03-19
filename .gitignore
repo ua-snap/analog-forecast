@@ -4,3 +4,8 @@
 # Byte-compiled / optimized / DLL files
 __pycache__/
 
+# CSVs
+*.csv
+# slurm stuff
+*.slurm
+*.out
