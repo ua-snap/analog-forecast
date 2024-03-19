@@ -5,9 +5,9 @@ python analog_forecast.py -v <variable name -d <reference date>
 The following other command line options are available:
   -sd <search domain>: search domain, default is alaska (see README for more options)
   -fd <forecast domain>: forecast domain, default is alaska (see README for more options)
-  --use-anom: boolean flag to use anomalies for identifying analogs
-  -n <number of analogs>: number of analogs to pull for generating forecast
-  -w <number of dask workers>: number of workers to use in dask
+  --use-anom: boolean flag to use anomalies for identifying analogs (default is False)
+  -n <number of analogs>: number of analogs to pull for generating forecast (default is 5)
+  -w <number of dask workers>: number of workers to use in dask (default is 8)
 
 Example usage with all args:
   python analog_forecast.py -v sst -d 2021-12-01 -sd alaska -fd northern_hs --use-anom -n 4 -w 12
@@ -143,8 +143,7 @@ def read_subset_era5(spatial_domain, data_dir, varname, use_anom):
         fp_lu_key = "filename"
     fp = data_dir.joinpath(luts.varnames_lu[varname][fp_lu_key])
 
-    # susbet the data spatially as was done for analogs, then extract
-    #  the next 14 days following the analog date
+    # susbet the data spatially as was done for analogs
     with xr.open_dataset(fp) as ds:
         sub_da = spatial_subset(ds[varname], bbox)
 
@@ -180,7 +179,11 @@ def get_search_da(da, ref_date, window, window_size=90):
     Args:
         da (xarray.DataArray): ERA5 dataArray, with time, latitude, longitude axes
         ref_date (str): reference date to compare all other preceding time slices against
-        window (str): option for omitting dates from the search window. 'precede' for the search window to stop 14 days short of the reference date; 'any' for only omitting the 14 days before/after the reference date, and the last 14 days of available data.
+        window (str): option for omitting dates from the search window.
+          'precede' for the search window to stop 14 days short of the reference date;
+            (Note, this potentially severely limits forcasts from earlier in the historical period!)
+          'any' for only omitting the 14 days before/after the reference date, and the last 14 days of available data.
+        window_size (int): size of inclusion window.
 
     Returns:
         search_da ((xarray.DataArray): data array to be searched for analogs
@@ -202,7 +205,7 @@ def get_search_da(da, ref_date, window, window_size=90):
         search_da = search_da.where(~search_da.time.isin(ref_window), drop=True)
 
     # prune search_da to only include days of year within seasonal (90 day) window
-    search_da = prune_search_da(search_da, ref_date, window_size=90)
+    search_da = prune_search_da(search_da, ref_date, window_size=window_size)
 
     return search_da
 
@@ -289,6 +292,8 @@ def take_analogs(error_da, buffer, n_analogs=5):
     td_buffer = pd.to_timedelta(buffer, "d")
     for t in error_da.time.values:
         if not any([t in dr for dr in analog_buffer_ranges]):
+            # check to see if analog is within any windows in analog_buffer_ranges.
+            # If not, "keep" it, then add a new buffer window to avoid for subsequent analogs.
             analog_buffer_ranges.append(pd.date_range(t - td_buffer, t + td_buffer))
             analog_times.append(t)
         if len(analog_buffer_ranges) == n_analogs:
@@ -314,14 +319,16 @@ def find_analogs(
     Returns:
         analogs (xarray.DataArray): data array of RMSE values and dates for 5 best analogs
     """
-    # compute RMSE between ref_date and all preceding dates
-    #  for the specified variable and spatial domain
+    # compute RMSE between ref_date and all dates in search_da
+    # currently the window option of "any" is hard-coded, which just means it will
+    #  look for analogs from all possible data besides what can't be used to construct analogs
+    #  (i.e. dates that would result in forecast inputs being pulled
+    #  from those we are actually trying to forecast)
     rmse_da = run_rmse_over_time(
         search_da, window="any", ref_da=ref_da, ref_date=ref_date
     )
     varname = search_da.name
 
-    # subset to first 5 analogs for now
     # impose restrictions on temporal proximity for analog based on variable.
     #  if SST, then we use an exclusion buffer of 6 months, atmospheric vars use 30 days
     if varname in ["t2m", "msl", "z"]:
@@ -345,7 +352,7 @@ def find_analogs(
 
 
 def make_forecast(sub_da, times, ref_date):
-    """Use a dataarray of analogs containing dates to create a composite forecast for 14 days following reference date
+    """Use a dataarray of analogs with dates to create a composite forecast for 14 days following reference date
 
     Args:
         sub_da (xarray.DataArray): data array of ERA5 data for variable and region of interest
@@ -355,6 +362,8 @@ def make_forecast(sub_da, times, ref_date):
     Returns:
         forecast (xarray.DataArray): forecast values computed for the 14 days following ref_date. Computed as the mean of corresponding days following each analog.
     """
+    # iterate over the analog time values (n of them, where n is the number of analogs)
+    #  and extract the 14 following days for each, creating an array with shape (n, 14, n_lat, n_lon)
     arr = []
     for t in times:
         time_sl = slice(
@@ -504,7 +513,7 @@ if __name__ == "__main__":
     forecast_ds = forecast.to_dataset()
 
     err.attrs = {"name": "Analog forecast error", "error_type": "rmse"}
-    forecast_ds.assign(error=err)
+    forecast_ds = forecast_ds.assign(error=err)
 
     out_anom_suffix = "_anom" if use_anom else ""
     out_fp = Path("forecasts").joinpath(
