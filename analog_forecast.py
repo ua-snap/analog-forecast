@@ -226,8 +226,8 @@ def rmse(da, ref_da):
         )
     except MemoryError:
         print("Encountered MemoryError. Retrying with dask")
-        sub_da = sub_da.chunk(time=1)
-        sq_err = (sub_da - ref_da) ** 2
+        da = da.chunk(time=1)
+        sq_err = (da - ref_da) ** 2
         rmse_arr = np.sqrt(np.nanmean(sq_err, axis=(1, 2)))
 
     rmse_da = xr.DataArray(
