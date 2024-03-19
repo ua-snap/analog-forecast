@@ -1,6 +1,10 @@
 """Main worker script for running the analog forecast. This script can be run from the command line like so:
 
-python analog_forecast.py -v <variable name -d <reference date> 
+python analog_forecast.py -v <variable name> -d <reference date> 
+
+Available variables are: sst, t2m, msl, and z. 
+You may choose any reference date within 1959-2021 if you do not have a CDS API key, and you may choose any date if you do have that set up.
+Dates must be in YYYY-mm-dd format.
 
 The following other command line options are available:
   -sd <search domain>: search domain, default is alaska (see README for more options)
@@ -38,7 +42,7 @@ def parse_args():
         type=str,
         help=(
             "Variable name to look for analogs. "
-            "Options are t2m (temperature), sst (sea surface temperature), msl (mean sea level pressure)"
+            "Options are t2m (temperature), sst (sea surface temperature), msl (mean sea level pressure), and z (geopotential)"
         ),
         required=True,
     )

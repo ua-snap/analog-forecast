@@ -29,6 +29,12 @@ The following four spatial domains are available for both analog search and fore
 
 You must use these names exactly as they are spelled here (case-sensitive).
 
+
+### Other options
+
+Available variables are: sst, t2m, msl, and z. 
+You may choose any reference date within 1959-2021 if you do not have a CDS API key, as this is what is currently available in the historical ERA5 archive. You may choose any date if you do have the CDS API key set up, as data for more recent reference dates will be downloaded automatically (if available). Dates must be in YYYY-mm-dd format.
+
 ## Contents
 
 `analog_forecast.py`: this is the main script and module for executing the analog forecast. It can be called from the command line or imported and run in a separate python environment, such as a jupyter notebook (done in `run_forecast.ipynb`.
