@@ -9,11 +9,11 @@ To run the basic analog forecast program from the command line:
 1. Create the conda environment via `conda env create -f environment.yml`
 2. Activate the conda environment (`conda activate analog-forecast`)
 3. Store the path to the ERA5 daily data in the `DATA_DIR` environment variable: `export DATA_DIR=/atlas_scratch/kmredilla/analog_forecast/`
-4. Store the path to the root direcotry of the repository in the `PROJECT_DIR` environment variable: `export PROJECT_DIR=$PWD`
-5. Run the analog_forecast.py script with the desired options:
+4. Store the path to the root directory of the repository in the `PROJECT_DIR` environment variable: e.g. `export PROJECT_DIR=path/to/analog-forecast` (or `export PROJECT_DIR=$PWD` if you are in the repo already). 
+5. Run the `analog_forecast.py` script with the desired options (see the script header for more info):
 
 ```
-python analog_forecast.py -v sst -d 2021-12-01 -s alaska
+python analog_forecast.py -v sst -d 2021-12-01 -sd alaska -fd alaska
 ```
 
 ### Spatial domains
@@ -27,13 +27,15 @@ The following four spatial domains are available for both analog search and fore
 "north_pacific": (120, 0, 240, 90)
 ```
 
+You must use these names exactly as they are spelled here (case-sensitive).
+
 ## Contents
 
-`analog_forecast.py`: this is the main module for generating the analog forecast. It can be called from the command line or imported and run in a separate python environment, such as a notebook.
+`analog_forecast.py`: this is the main script and module for executing the analog forecast. It can be called from the command line or imported and run in a separate python environment, such as a jupyter notebook (done in `run_forecast.ipynb`.
 `config.py`: config file with some useful constants
 `luts.py`: like config but for lookup tables (dicts)
 `qc.ipynb`: notebook for quality checking different parts of the algorithm
-`run_forecast.ipynb`: notebook for running the analog forecast program. Includes code for downloading ERA5 data if you want to generate a forecast for a date not included in the historical data archive, and interactive visualization of forecast error if forecast dates are found in the historical archive.
+`run_forecast.ipynb`: notebook for running the analog forecast program. Includes an interactive visualization of forecast error.
 
 ## `scripts/`
 
